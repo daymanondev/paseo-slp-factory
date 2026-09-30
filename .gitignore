@@ -1,0 +1,20 @@
+# Kho tư liệu nghiên cứu — nội bộ, không public
+research/
+
+# macOS
+.DS_Store
+
+# ZCode workspace state
+.zcode/
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Env & secrets
+.env
+.env.*
