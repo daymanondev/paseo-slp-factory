@@ -1,9 +1,12 @@
 # andrew-room — SLP riêng của Andrew
 
-Repo này là nơi **build một room SLP (Supervisor–Lead–Peer) cho riêng mình**, vận hành trên
-Paseo + seatworks v3 (data-only, không fork). Doc phát triển sống:
+Repo này là nơi build **`paseo-factory`** — plugin Paseo riêng triển khai room SLP
+(Supervisor–Lead–Peer) theo stack của Andrew: **GLM viết · Gemini/Agy chấm và nhìn · Jev canh ·
+Human quyết**. Kiến trúc core-first: core thuần Node (contracts, ledger, gate) + vỏ plugin
+server-only, UI đắp sau khi contract chín. Trong lúc dựng, room chạy production trên seatworks
+v3 (data-only, không fork) làm hệ đối chiếu. Doc phát triển sống:
 [research/03-hands-on/04-andrew-room.md](research/03-hands-on/04-andrew-room.md) — model map,
-prompts, runbook.
+prompts, runbook, lịch sử quyết định.
 
 **Trạng thái: đang khởi động** (30/9/2026) — phần lớn tri thức nền đã nghiên cứu xong, bắt
 đầu đưa vào vận hành thật cho dự án thật.
@@ -13,7 +16,7 @@ prompts, runbook.
 | Vị trí | Là gì |
 |---|---|
 | `research/` | **Kho tư liệu nội bộ, không theo git** (đã `.gitignore`) — toàn bộ giai đoạn nghiên cứu Paseo/SLP. Index: [research/README.md](research/README.md) |
-| *(sắp có)* | Code + cấu hình của room: roles, prompts, scripts vận hành |
+| `paseo-factory/` *(sắp có)* | Plugin: core (contracts + ledger JSONL + gate runner + report) + vỏ plugin server-only |
 
 ## Nguyên tắc mang theo từ giai đoạn nghiên cứu
 
