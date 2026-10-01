@@ -6,6 +6,17 @@
 
 export type Verdict = "red" | "green";
 
+/** The whole event vocabulary, in ledger order — single source for types and validation. */
+export const EVENT_NAMES = [
+  "contract_set",
+  "done_reported",
+  "gate_started",
+  "gate_finished",
+  "report_written",
+] as const;
+
+export type EventName = (typeof EVENT_NAMES)[number];
+
 export interface ContractSet {
   seq: number;
   event: "contract_set";

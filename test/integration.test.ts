@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createFactory } from "../src/index.ts";
 import { copyFixture, disposeDir, makeTempDir } from "./helpers.ts";
@@ -66,7 +66,6 @@ test("the same workspace passes once the artifact actually satisfies its tests",
   factory.setContract({ task: "T2", gate: "npm test", artifact: "src/format.ts" });
 
   // The agent fixes the work for real, then claims done again.
-  const { writeFileSync } = await import("node:fs");
   writeFileSync(
     join(workspace, "src", "format.ts"),
     [

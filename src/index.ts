@@ -15,6 +15,7 @@ export { FactoryError } from "./errors.ts";
 export { DEFAULT_GATE_TIMEOUT_MS, REPORT_NOTE_MAX_CHARS, STDOUT_TAIL_CAP_BYTES } from "./constants.ts";
 export type {
   Verdict,
+  EventName,
   LedgerEvent,
   PendingEvent,
   ContractSet,
@@ -23,3 +24,4 @@ export type {
   GateFinished,
   ReportWritten,
 } from "./events.ts";
+export { EVENT_NAMES } from "./events.ts";

@@ -1,19 +1,16 @@
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import { FactoryError } from "./errors.ts";
+import { EVENT_NAMES } from "./events.ts";
 import type { LedgerEvent, PendingEvent } from "./events.ts";
-
-const EVENT_NAMES: ReadonlySet<string> = new Set([
-  "contract_set",
-  "done_reported",
-  "gate_started",
-  "gate_finished",
-  "report_written",
-]);
 
 /**
  * Append-only JSONL ledger. Lines are never mutated or rewritten — the file is
  * the audit trail; `events` is just the read-back view of it.
+ *
+ * One instance per file per process: two `open` calls on the same path keep
+ * independent seq counters and would collide. The v0.0.1 shell holds exactly
+ * one factory (and therefore one ledger) per daemon.
  */
 export class Ledger {
   readonly #path: string;
@@ -61,7 +58,7 @@ export class Ledger {
           Number.isInteger((evt as { seq?: unknown }).seq) &&
           (evt as { seq: number }).seq > prevSeq &&
           typeof (evt as { event?: unknown }).event === "string" &&
-          EVENT_NAMES.has((evt as { event: string }).event) &&
+          (EVENT_NAMES as readonly string[]).includes((evt as { event: string }).event) &&
           typeof (evt as { task?: unknown }).task === "string";
         if (!valid) {
           throw new FactoryError("corrupted-ledger", `line ${i + 1} of ${path} is not a valid ledger event`);

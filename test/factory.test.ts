@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createFactory } from "../src/factory.ts";
 import { FactoryError } from "../src/errors.ts";
-import { disposeDir, makeTempDir } from "./helpers.ts";
+import { disposeDir, factoryErrorCode, makeTempDir } from "./helpers.ts";
 
 function makeWorkspace(dir: string): { workspace: string; artifact: string } {
   const workspace = join(dir, "ws");
@@ -24,7 +24,7 @@ test("setContract records the contract and enforces one contract per task", (t) 
   assert.deepEqual(evt, { seq: 1, event: "contract_set", task: "T1", gate: "npm test", artifact: "src/format.ts" });
   assert.throws(
     () => factory.setContract({ task: "T1", gate: "echo easier", artifact: "x.ts" }),
-    (err: unknown) => err instanceof FactoryError && err.code === "contract-exists",
+    factoryErrorCode("contract-exists"),
   );
 });
 
@@ -52,7 +52,7 @@ test("reportDone without a contract fails before anything is appended", async (t
 
   await assert.rejects(
     factory.reportDone({ task: "T404", sha: "a1b2c3d" }),
-    (err: unknown) => err instanceof FactoryError && err.code === "unknown-task",
+    factoryErrorCode("unknown-task"),
   );
   await assert.rejects(factory.reportDone({ task: "T404", sha: "" }), FactoryError);
   assert.deepEqual([...factory.ledger.events], []);
@@ -106,6 +106,23 @@ test("reportDone timeout flows through as red with exit null", async (t) => {
   assert.equal(outcome.verdict, "red");
   assert.equal(outcome.gate.exit, null);
   assert.match(outcome.gate.note, /timeout/i);
+});
+
+test("a gate that cannot even start still lands a red gate_finished in the ledger", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const factory = createFactory({ stateDir: join(dir, "factory"), workspace: "/nonexistent-cwd-xyz" });
+
+  factory.setContract({ task: "T12", gate: "true", artifact: "whatever.ts" });
+  const outcome = await factory.reportDone({ task: "T12", sha: "bead" });
+
+  assert.equal(outcome.verdict, "red");
+  assert.equal(outcome.gate.exit, null);
+  assert.match(outcome.gate.note, /failed to start/);
+  assert.deepEqual(
+    factory.ledger.eventsFor("T12").map((e) => e.event),
+    ["contract_set", "done_reported", "gate_started", "gate_finished", "report_written"],
+  );
 });
 
 test("two tasks share one ledger with independent seq and reports", async (t) => {

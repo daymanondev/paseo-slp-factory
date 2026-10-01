@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runGate } from "../src/gate.ts";
-import { REPORT_NOTE_MAX_CHARS, STDOUT_TAIL_CAP_BYTES } from "../src/constants.ts";
+import { REPORT_NOTE_MAX_CHARS } from "../src/constants.ts";
 import { disposeDir, makeTempDir } from "./helpers.ts";
 
 test("exit 0 with the artifact present is green", async (t) => {
@@ -61,7 +61,6 @@ test("output is capped: only the tail is kept, note stays under the cap", async 
   assert.ok(result.note.length <= REPORT_NOTE_MAX_CHARS, `note was ${result.note.length} chars`);
   assert.match(result.note, /line-20000/, "the tail keeps the end of the output");
   assert.doesNotMatch(result.note, /line-1\b.*line-10000/, "old output must be dropped");
-  assert.ok(STDOUT_TAIL_CAP_BYTES > 0);
 });
 
 test("timeout kills the gate and records red with exit null", async (t) => {

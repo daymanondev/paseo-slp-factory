@@ -3,8 +3,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { TestContext } from "node:test";
+import { FactoryError } from "../src/errors.ts";
 
 export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** Predicate for assert.throws / assert.rejects that matches a FactoryError code. */
+export function factoryErrorCode(code: string): (err: unknown) => err is FactoryError {
+  return (err: unknown): err is FactoryError => err instanceof FactoryError && err.code === code;
+}
 
 export function makeTempDir(prefix = "paseo-factory-test-"): string {
   return mkdtempSync(join(tmpdir(), prefix));

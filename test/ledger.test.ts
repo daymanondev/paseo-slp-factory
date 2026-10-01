@@ -1,10 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ledger } from "../src/ledger.ts";
-import { FactoryError } from "../src/errors.ts";
-import { disposeDir, makeTempDir } from "./helpers.ts";
+import { disposeDir, factoryErrorCode, makeTempDir } from "./helpers.ts";
 
 test("fresh ledger starts at seq 1 and writes exactly the doc §2 line shape", (t) => {
   const dir = makeTempDir();
@@ -63,7 +62,7 @@ test("a garbage line is rejected as corruption, not silently skipped", (t) => {
   const path = join(dir, "ledger.jsonl");
   writeFileSync(path, '{"seq":1,"event":"contract_set"\n');
 
-  assert.throws(() => Ledger.open(path), (err: unknown) => err instanceof FactoryError && err.code === "corrupted-ledger");
+  assert.throws(() => Ledger.open(path), factoryErrorCode("corrupted-ledger"));
 });
 
 test("a seq that does not strictly increase is rejected as corruption", (t) => {
@@ -76,7 +75,7 @@ test("a seq that does not strictly increase is rejected as corruption", (t) => {
       '{"seq":1,"event":"done_reported","task":"T1","sha":"a1b2c3d"}\n',
   );
 
-  assert.throws(() => Ledger.open(path), (err: unknown) => err instanceof FactoryError && err.code === "corrupted-ledger");
+  assert.throws(() => Ledger.open(path), factoryErrorCode("corrupted-ledger"));
 });
 
 test("a blank line in the middle is rejected as corruption", (t) => {
@@ -89,7 +88,7 @@ test("a blank line in the middle is rejected as corruption", (t) => {
       '{"seq":2,"event":"done_reported","task":"T1","sha":"a1b2c3d"}\n',
   );
 
-  assert.throws(() => Ledger.open(path), (err: unknown) => err instanceof FactoryError && err.code === "corrupted-ledger");
+  assert.throws(() => Ledger.open(path), factoryErrorCode("corrupted-ledger"));
 });
 
 test("an unknown event name is rejected as corruption", (t) => {
@@ -98,7 +97,7 @@ test("an unknown event name is rejected as corruption", (t) => {
   const path = join(dir, "ledger.jsonl");
   writeFileSync(path, '{"seq":1,"event":"gate_was_green","task":"T1"}\n');
 
-  assert.throws(() => Ledger.open(path), (err: unknown) => err instanceof FactoryError && err.code === "corrupted-ledger");
+  assert.throws(() => Ledger.open(path), factoryErrorCode("corrupted-ledger"));
 });
 
 test("open creates the parent directory and tolerates a missing file", (t) => {
@@ -121,5 +120,4 @@ test("eventsFor filters by task across event kinds", (t) => {
   ledger.append({ event: "done_reported", task: "T1", sha: "a1b2c3d" });
 
   assert.deepEqual(ledger.eventsFor("T1").map((e) => e.event), ["contract_set", "done_reported"]);
-  mkdirSync(dir, { recursive: true });
 });

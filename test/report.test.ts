@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderReport } from "../src/report.ts";
 import type { LedgerEvent } from "../src/events.ts";
-import { FactoryError } from "../src/errors.ts";
+import { factoryErrorCode } from "./helpers.ts";
 
 function docSection2Events(): LedgerEvent[] {
   return [
@@ -64,6 +64,6 @@ test("refuses to render when the task history is incomplete", () => {
   const events = docSection2Events().filter((e) => e.event !== "gate_finished");
   assert.throws(
     () => renderReport("T1", events),
-    (err: unknown) => err instanceof FactoryError && err.code === "incomplete-history",
+    factoryErrorCode("incomplete-history"),
   );
 });

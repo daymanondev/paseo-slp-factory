@@ -5,6 +5,7 @@ import { runGate } from "./gate.ts";
 import { renderReport } from "./report.ts";
 import { FactoryError } from "./errors.ts";
 import type { ContractSet, GateFinished, Verdict } from "./events.ts";
+import type { GateResult } from "./gate.ts";
 
 /** Task ids become report filenames, so they stay flat and filename-safe. */
 const TASK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -77,12 +78,24 @@ export function createFactory(options: FactoryOptions): Factory {
 
       ledger.append({ event: "done_reported", task, sha });
       ledger.append({ event: "gate_started", task, cmd: contract.gate });
-      const result = await runGate({
-        cmd: contract.gate,
-        cwd: workspace,
-        artifact: contract.artifact,
-        timeoutMs: options.timeoutMs,
-      });
+      let result: GateResult;
+      try {
+        result = await runGate({
+          cmd: contract.gate,
+          cwd: workspace,
+          artifact: contract.artifact,
+          timeoutMs: options.timeoutMs,
+        });
+      } catch (err) {
+        // A gate that cannot even start is a red fact, not an aborted sequence —
+        // the ledger must still reach gate_finished.
+        result = {
+          exit: null,
+          verdict: "red",
+          note: `gate failed to start: ${err instanceof Error ? err.message : String(err)}`,
+          timedOut: false,
+        };
+      }
       const gate = ledger.append({
         event: "gate_finished",
         task,
