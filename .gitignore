@@ -18,3 +18,6 @@ __pycache__/
 # Env & secrets
 .env
 .env.*
+
+# Local issue tracker (engineering skills) — not published
+.scratch/
