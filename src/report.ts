@@ -27,7 +27,9 @@ export function renderReport(task: string, events: readonly LedgerEvent[], now: 
 
   const lines = [
     `# ${task} — ${formatTimestamp(now)}`,
-    `- Contract: \`${contract.gate}\` green · file \`${contract.artifact}\` exists`,
+    `- Contract: \`${contract.gate}\` green · file \`${contract.artifact}\` exists${
+      contract.scope === undefined ? "" : ` · scope: ${contract.scope.map((s) => `\`${s}\``).join(", ")}`
+    }`,
     `- Agent claimed @ ${claim.sha}`,
     ...(gate.sha === undefined ? [] : [`- Attested commit: \`${gate.sha}\``]),
     `- Verdict: ${gate.verdict.toUpperCase()} — ${gate.note}`,
