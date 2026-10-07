@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Plugin shell (ticket 06): the Paseo plugin that loads on a 0.10 daemon
+  (`paseo-plugin.json`, `requirements.paseo >=0.10.0 <0.11.0`). The server entry
+  logs a startup banner, resolves the state root under the daemon home
+  (`PASEO_HOME` → `plugin-state/paseo-factory/`), opens the ledger through the
+  vendored core, and injects the `factory-claim` CLI onto every agent's PATH
+  via the `agent.session_open` before-hook (ADR 0004: CLIs, not MCP tools; the
+  hook fires on create/resume/refresh, which `agent.create` env alone does
+  not). The CLI is a stub until the loop is wired. `plugin/server/core/` is a
+  byte-exact vendored copy of `src/` (the daemon compiler rejects imports from
+  outside the plugin directory), kept in sync by `npm run sync:plugin-core`
+  and guarded by a test.
+- README stating what the plugin is and its status (ADR 0001).
 - Verification core v0.0.1 (ticket 07), pure Node with zero Paseo imports:
   - Contract registration (`contract_set`): gate command + required artifact path per task.
   - Append-only `ledger.jsonl` with monotonically increasing `seq`, fsync per line,

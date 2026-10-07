@@ -13,9 +13,12 @@
   },
   "scripts": {
     "test": "node --test \"test/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sync:plugin-core": "node scripts/sync-plugin-core.mjs",
+    "sync:plugin-core:check": "node scripts/sync-plugin-core.mjs --check"
   },
   "devDependencies": {
+    "@getpaseo/plugin": "^0.10.3",
     "@types/node": "^22.10.0",
     "typescript": "^5.8.0"
   }
