@@ -26,7 +26,7 @@ test("seq increases monotonically and the file gains one line per event", (t) =>
   const ledger = Ledger.open(path);
 
   ledger.append({ event: "contract_set", task: "T1", gate: "npm test", artifact: "src/format.ts" });
-  ledger.append({ event: "done_reported", task: "T1", sha: "a1b2c3d" });
+  ledger.append({ event: "claim_reported", task: "T1", sha: "a1b2c3d" });
   ledger.append({ event: "gate_started", task: "T1", cmd: "npm test" });
   ledger.append({ event: "gate_finished", task: "T1", exit: 1, verdict: "red", note: "2 tests failed" });
   ledger.append({ event: "report_written", task: "T1", path: "factory/report-T1.md" });
@@ -43,7 +43,7 @@ test("reopening continues from the last seq and never rewrites earlier lines", (
 
   const first = Ledger.open(path);
   first.append({ event: "contract_set", task: "T1", gate: "npm test", artifact: "src/format.ts" });
-  first.append({ event: "done_reported", task: "T1", sha: "a1b2c3d" });
+  first.append({ event: "claim_reported", task: "T1", sha: "a1b2c3d" });
   const before = readFileSync(path, "utf8");
 
   const reopened = Ledger.open(path);
@@ -72,7 +72,7 @@ test("a seq that does not strictly increase is rejected as corruption", (t) => {
   writeFileSync(
     path,
     '{"seq":1,"event":"contract_set","task":"T1","gate":"npm test","artifact":"src/format.ts"}\n' +
-      '{"seq":1,"event":"done_reported","task":"T1","sha":"a1b2c3d"}\n',
+      '{"seq":1,"event":"claim_reported","task":"T1","sha":"a1b2c3d"}\n',
   );
 
   assert.throws(() => Ledger.open(path), factoryErrorCode("corrupted-ledger"));
@@ -85,7 +85,7 @@ test("a blank line in the middle is rejected as corruption", (t) => {
   writeFileSync(
     path,
     '{"seq":1,"event":"contract_set","task":"T1","gate":"npm test","artifact":"src/format.ts"}\n\n' +
-      '{"seq":2,"event":"done_reported","task":"T1","sha":"a1b2c3d"}\n',
+      '{"seq":2,"event":"claim_reported","task":"T1","sha":"a1b2c3d"}\n',
   );
 
   assert.throws(() => Ledger.open(path), factoryErrorCode("corrupted-ledger"));
@@ -107,7 +107,7 @@ test("open creates the parent directory and tolerates a missing file", (t) => {
   const ledger = Ledger.open(join(nested, "ledger.jsonl"));
 
   assert.deepEqual([...ledger.events], []);
-  ledger.append({ event: "done_reported", task: "T1", sha: "a1b2c3d" });
+  ledger.append({ event: "claim_reported", task: "T1", sha: "a1b2c3d" });
   assert.equal(readFileSync(join(nested, "ledger.jsonl"), "utf8").trimEnd().split("\n").length, 1);
 });
 
@@ -117,7 +117,7 @@ test("eventsFor filters by task across event kinds", (t) => {
   const ledger = Ledger.open(join(dir, "ledger.jsonl"));
   ledger.append({ event: "contract_set", task: "T1", gate: "npm test", artifact: "src/format.ts" });
   ledger.append({ event: "contract_set", task: "T2", gate: "npm test", artifact: "src/other.ts" });
-  ledger.append({ event: "done_reported", task: "T1", sha: "a1b2c3d" });
+  ledger.append({ event: "claim_reported", task: "T1", sha: "a1b2c3d" });
 
-  assert.deepEqual(ledger.eventsFor("T1").map((e) => e.event), ["contract_set", "done_reported"]);
+  assert.deepEqual(ledger.eventsFor("T1").map((e) => e.event), ["contract_set", "claim_reported"]);
 });

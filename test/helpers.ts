@@ -1,4 +1,5 @@
 import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,4 +23,31 @@ export function disposeDir(t: TestContext, dir: string): void {
 
 export function copyFixture(name: string, dest: string): void {
   cpSync(join(repoRoot, "fixtures", name), dest, { recursive: true });
+}
+
+/**
+ * Makes `dir` a git workspace with one commit and returns that commit's full
+ * sha — claims are verified against the workspace (ADR 0002), so tests need a
+ * real commit to claim, never a fake sha.
+ */
+export function gitCommitAll(dir: string, message = "test commit"): string {
+  const run = (args: string[]): void => {
+    execFileSync("git", args, { cwd: dir, stdio: ["ignore", "ignore", "pipe"] });
+  };
+  run(["init", "-q"]);
+  run(["config", "user.email", "test@example.com"]);
+  run(["config", "user.name", "Factory Test"]);
+  run(["add", "-A"]);
+  run(["commit", "-q", "-m", message]);
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).trim();
+}
+
+/** Commits current changes (the agent's "work") and returns the new full sha. */
+export function gitCommitChanges(dir: string, message: string): string {
+  const run = (args: string[]): void => {
+    execFileSync("git", args, { cwd: dir, stdio: ["ignore", "ignore", "pipe"] });
+  };
+  run(["add", "-A"]);
+  run(["commit", "-q", "-m", message]);
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).trim();
 }
