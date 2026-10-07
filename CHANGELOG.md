@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-10-07
+
+First runnable loop, proven live end-to-end on a trial Paseo 0.10 daemon.
+
 ### Added
 
 - `factory status` — the Owner's read-only glance at the ledger: one line per
