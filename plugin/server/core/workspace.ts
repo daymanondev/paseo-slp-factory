@@ -113,6 +113,22 @@ export function changesOutsideScope(
   );
 }
 
+/**
+ * The full patch between the Contract's base commit and the claimed commit —
+ * the fresh-eyes input bundle's diff section (ticket 03 §4). Facts only: size
+ * caps belong to the bundle builder, not to git.
+ */
+export function diffBetween(
+  cwd: string,
+  base: string,
+  claimed: string,
+): Promise<{ ok: true; diff: string } | { ok: false; reason: string }> {
+  return git(cwd, ["diff", base, claimed]).then(
+    ({ stdout }) => ({ ok: true as const, diff: stdout }),
+    (err: unknown) => ({ ok: false as const, reason: cap(gitDetail(err)) }),
+  );
+}
+
 function gitDetail(err: unknown): string {
   const stderr = (err as { stderr?: unknown }).stderr;
   const first = typeof stderr === "string" && stderr.trim() !== "" ? stderr.trim().split("\n")[0] : "";

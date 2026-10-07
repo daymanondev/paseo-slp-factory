@@ -48,6 +48,7 @@ test("roadmap §2 scenario: red npm test produces the five-event ledger and a re
     workspace,
     gate: "npm test",
     artifact: "src/format.ts",
+    base: sha,
   });
   assert.deepEqual(lineWithoutTs(lines[1]!), { seq: 2, event: "claim_reported", task: "T1", attempt: 1, sha });
   assert.deepEqual(lineWithoutTs(lines[2]!), { seq: 3, event: "gate_started", task: "T1", attempt: 1, cmd: "npm test" });

@@ -16,7 +16,7 @@ import { PLUGIN_ID, pluginDirFor, resolvePaseoHome, stateDirFor } from "./server
 import { claimCliBinDir, ensureClaimCli, injectClaimCliPath } from "./server/shell.ts";
 import { spoolRootFor, startSpool } from "./server/spool.ts";
 
-const SHELL_VERSION = "0.0.1";
+const SHELL_VERSION = "0.0.2";
 
 const log = (message: string) => console.log(`[${PLUGIN_ID}] ${message}`);
 

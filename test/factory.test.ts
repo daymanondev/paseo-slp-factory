@@ -18,7 +18,7 @@ function makeWorkspace(dir: string): { workspace: string; artifact: string; sha:
 test("setContract records the workspace with the criteria and enforces one contract per task", (t) => {
   const dir = makeTempDir();
   disposeDir(t, dir);
-  const { workspace } = makeWorkspace(dir);
+  const { workspace, sha } = makeWorkspace(dir);
   const factory = createFactory({ stateDir: join(dir, "factory") });
 
   const evt = factory.setContract({ task: "T1", workspace, gate: "npm test", artifact: "src/format.ts" });
@@ -32,6 +32,7 @@ test("setContract records the workspace with the criteria and enforces one contr
     workspace,
     gate: "npm test",
     artifact: "src/format.ts",
+    base: sha, // recorded on every Contract since v0.0.2 (ticket 03 R2)
   });
   assert.throws(
     () => factory.setContract({ task: "T1", workspace, gate: "echo easier", artifact: "x.ts" }),
@@ -238,7 +239,7 @@ test("a gate command that does not exist is red with the shell's exit code", asy
   );
 });
 
-test("a workspace that is not a git repo is red, not a crash", async (t) => {
+test("a workspace git cannot read is refused at contract time — the base is the diff range (ticket 03 R2)", (t) => {
   const dir = makeTempDir();
   disposeDir(t, dir);
   const workspace = join(dir, "plain");
@@ -246,11 +247,13 @@ test("a workspace that is not a git repo is red, not a crash", async (t) => {
   writeFileSync(join(workspace, "src", "format.ts"), "export function pad() {}\n");
   const factory = createFactory({ stateDir: join(dir, "factory") });
 
-  factory.setContract({ task: "G1", workspace, gate: "true", artifact: "src/format.ts" });
-  const outcome = await factory.claim({ task: "G1", sha: "a1b2c3d" });
-
-  assert.equal(outcome.verdict, "red");
-  assert.match(outcome.gate.note, /cannot be resolved/);
+  // Since v0.0.2 every Contract records its base commit, so a workspace with
+  // no resolvable HEAD is refused up front — scoped or not.
+  assert.throws(
+    () => factory.setContract({ task: "G1", workspace, gate: "true", artifact: "src/format.ts" }),
+    factoryErrorCode("invalid-contract"),
+  );
+  assert.deepEqual([...factory.ledger.events], []);
 });
 
 test("scoped contract: an in-scope-only diff behaves exactly as today", async (t) => {

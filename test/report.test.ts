@@ -31,6 +31,38 @@ test("renders the report shape for a red gate — evidence only, timestamps from
   );
 });
 
+test("renders agent attribution and the eye's line between the Verdict and the closing language", () => {
+  const events: LedgerEvent[] = [
+    { seq: 1, ts: "2026-10-01T09:00:00.000Z", event: "contract_set", task: "T4", workspace: "/w", gate: "npm test", artifact: "src/format.ts", freshEyes: true },
+    { seq: 2, ts: "2026-10-01T09:01:00.000Z", event: "claim_reported", task: "T4", attempt: 1, sha: "feed123", agent: "agent-7" },
+    { seq: 3, ts: "2026-10-01T09:01:01.000Z", event: "gate_started", task: "T4", attempt: 1, cmd: "npm test" },
+    { seq: 4, ts: "2026-10-01T09:01:20.000Z", event: "gate_finished", task: "T4", attempt: 1, exit: 0, verdict: "green", note: "3 pass 0 fail", sha: "feed1234567890abcdef4567890abcdef4567890" },
+    { seq: 5, ts: "2026-10-01T09:01:21.000Z", event: "fresh_eyes_written", task: "T4", attempt: 1, model: "gemini-3.8-flash-high", outcome: "concern", finding: "pad drops the width argument — src/format.ts:2.", durationMs: 4100 },
+    { seq: 6, ts: "2026-10-01T09:01:22.000Z", event: "report_written", task: "T4", attempt: 1, path: "factory/report-T4-1.md" },
+  ];
+  const report = renderReport("T4", 1, events);
+  const lines = report.split("\n");
+  assert.equal(lines[5], "- Claimed by agent `agent-7`");
+  const verdictAt = lines.findIndex((l) => l.startsWith("- Verdict: GREEN"));
+  const eyeAt = lines.findIndex((l) => l === "- Fresh eyes (`gemini-3.8-flash-high`) — CONCERN: pad drops the width argument — src/format.ts:2.");
+  const closingAt = lines.findIndex((l) => l.startsWith("- Evidence, not acceptance"));
+  assert.ok(verdictAt > -1 && eyeAt === verdictAt + 1 && closingAt === eyeAt + 1, `eye line sits between verdict and closing language:\n${report}`);
+});
+
+test("renders a failed eye pass with its error where the Owner reads", () => {
+  const events: LedgerEvent[] = [
+    { seq: 1, ts: "2026-10-01T14:05:00.000Z", event: "contract_set", task: "T5", workspace: "/w", gate: "npm test", artifact: "src/format.ts", freshEyes: true },
+    { seq: 2, ts: "2026-10-01T14:05:01.000Z", event: "claim_reported", task: "T5", attempt: 1, sha: "feed123" },
+    { seq: 3, ts: "2026-10-01T14:05:02.000Z", event: "gate_started", task: "T5", attempt: 1, cmd: "npm test" },
+    { seq: 4, ts: "2026-10-01T14:05:30.000Z", event: "gate_finished", task: "T5", attempt: 1, exit: 0, verdict: "green", note: "ok", sha: "feed1234567890abcdef4567890abcdef4567890" },
+    { seq: 5, ts: "2026-10-01T14:05:31.000Z", event: "fresh_eyes_written", task: "T5", attempt: 1, model: "gemini-3.8-flash-high", outcome: "failed", finding: "eye API answered 401", durationMs: 120 },
+    { seq: 6, ts: "2026-10-01T14:05:32.000Z", event: "report_written", task: "T5", attempt: 1, path: "factory/report-T5-1.md" },
+  ];
+  const report = renderReport("T5", 1, events);
+  assert.ok(report.includes("- Fresh eyes (`gemini-3.8-flash-high`) — FAILED: eye API answered 401"));
+  assert.ok(report.includes("- Evidence, not acceptance"), "the verdict's closing language stays the last word");
+});
+
 test("renders evidence-not-acceptance for a green gate, with the attested commit", () => {
   const events: LedgerEvent[] = [
     { seq: 1, ts: "2026-10-01T08:59:00.000Z", event: "contract_set", task: "T2", workspace: "/workspaces/sample", gate: "npm test", artifact: "src/format.ts" },

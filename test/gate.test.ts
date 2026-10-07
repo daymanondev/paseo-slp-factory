@@ -63,16 +63,41 @@ test("output is capped: only the tail is kept, note stays under the cap", async 
   assert.doesNotMatch(result.note, /line-1\b.*line-10000/, "old output must be dropped");
 });
 
+test("a truncated note cuts at a word boundary with a leading ellipsis — never mid-word (ticket 02c)", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const filler = "x".repeat(300); // one giant word the cut would otherwise split
+
+  const result = await runGate({ cmd: `printf '%s tail-word-here' '${filler}'; exit 1`, cwd: dir });
+
+  assert.equal(result.verdict, "red");
+  assert.ok(result.note.length <= REPORT_NOTE_MAX_CHARS);
+  assert.ok(result.note.startsWith("…"), "the cut is marked");
+  assert.match(result.note, /tail-word-here/);
+  assert.ok(!result.note.slice(1).startsWith("x"), "no partial word survives the cut");
+});
+
+test("the captured output is raw, not the collapsed note — it keeps whitespace (ticket 02a)", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+
+  const result = await runGate({ cmd: "printf 'a\\n\\nb\\n'; exit 1", cwd: dir });
+
+  assert.equal(result.output, "a\n\nb\n", "the persisted log's bytes, as they arrived");
+  assert.equal(result.note, "a b", "the note keeps its one-line summary role");
+});
+
 test("timeout kills the gate and records red with exit null", async (t) => {
   const dir = makeTempDir();
   disposeDir(t, dir);
 
-  const result = await runGate({ cmd: "sleep 30", cwd: dir, timeoutMs: 250 });
+  const result = await runGate({ cmd: "echo before-timeout; sleep 30", cwd: dir, timeoutMs: 250 });
 
   assert.equal(result.timedOut, true);
   assert.equal(result.exit, null);
   assert.equal(result.verdict, "red");
   assert.match(result.note, /timeout/i);
+  assert.equal(result.output, "before-timeout\n", "output captured up to the kill still survives in full");
 });
 
 test("spawn failure in a bad cwd rejects instead of inventing a verdict", async () => {

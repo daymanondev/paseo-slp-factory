@@ -57,6 +57,11 @@ test("parseSpoolRequest accepts exactly the three request shapes and nothing els
     gate: "true",
     artifact: "a",
   });
+  assert.deepEqual(
+    parseSpoolRequest({ id: "r1", kind: "contract", task: "T1", workspace: "/w", gate: "true", artifact: "a", freshEyes: true }),
+    { id: "r1", kind: "contract", task: "T1", workspace: "/w", gate: "true", artifact: "a", freshEyes: true },
+    "freshEyes passes only as literal true",
+  );
 
   for (const bad of [
     null,
@@ -68,6 +73,8 @@ test("parseSpoolRequest accepts exactly the three request shapes and nothing els
     { id: "r1", kind: "claim", task: "T1", sha: 7 },
     { id: "r1", kind: "accept", task: "T1", attempt: "2" },
     { kind: "claim", task: "T1", sha: "abc" },
+    { id: "r1", kind: "contract", task: "T1", workspace: "/w", gate: "true", artifact: "a", freshEyes: "yes" },
+    { id: "r1", kind: "contract", task: "T1", workspace: "/w", gate: "true", artifact: "a", freshEyes: false },
   ]) {
     assert.equal(parseSpoolRequest(bad), undefined, `${JSON.stringify(bad)} must be rejected`);
   }

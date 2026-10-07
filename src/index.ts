@@ -7,14 +7,24 @@
  */
 export { createFactory } from "./factory.ts";
 export type { Factory, FactoryOptions, ContractInput, ClaimInput, ClaimOutcome, AcceptInput } from "./factory.ts";
-export { resolveClaimedCommit, checkCleanAt } from "./workspace.ts";
+export { resolveClaimedCommit, checkCleanAt, diffBetween } from "./workspace.ts";
 export type { CommitResolution, TreeCheck } from "./workspace.ts";
 export { Ledger } from "./ledger.ts";
 export { runGate } from "./gate.ts";
 export type { GateInput, GateResult } from "./gate.ts";
+export { eyeConfigPath, loadEyeConfig, runFreshEyesPass, tailWithMarker, parseEyeAnswer } from "./fresh-eyes.ts";
+export type { EyeConfig, EyeConfigResult, FreshEyesOutcome, FreshEyesPassInput, ParsedEyeAnswer } from "./fresh-eyes.ts";
 export { renderReport } from "./report.ts";
 export { FactoryError } from "./errors.ts";
-export { DEFAULT_GATE_TIMEOUT_MS, REPORT_NOTE_MAX_CHARS, STDOUT_TAIL_CAP_BYTES } from "./constants.ts";
+export {
+  DEFAULT_GATE_TIMEOUT_MS,
+  GATE_OUTPUT_CAP_BYTES,
+  REPORT_NOTE_MAX_CHARS,
+  EYE_TOTAL_BUDGET_MS,
+  EYE_DIFF_MAX_CHARS,
+  EYE_GATE_OUTPUT_MAX_CHARS,
+  EYE_MAX_TOKENS,
+} from "./constants.ts";
 export type {
   Verdict,
   EventName,
@@ -25,6 +35,7 @@ export type {
   ClaimReported,
   GateStarted,
   GateFinished,
+  FreshEyesWritten,
   ReportWritten,
   AttemptAccepted,
 } from "./events.ts";

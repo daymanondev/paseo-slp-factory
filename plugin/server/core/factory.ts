@@ -3,6 +3,7 @@ import { isAbsolute, join } from "node:path";
 import { Ledger } from "./ledger.ts";
 import { runGate } from "./gate.ts";
 import { renderReport } from "./report.ts";
+import { loadEyeConfig, runFreshEyesPass } from "./fresh-eyes.ts";
 import { changesOutsideScope, checkCleanAt, headCommitSync, resolveClaimedCommit } from "./workspace.ts";
 import { FactoryError } from "./errors.ts";
 import type { AttemptAccepted, ContractSet, GateFinished, LedgerEvent, Verdict } from "./events.ts";
@@ -12,10 +13,12 @@ import type { GateResult } from "./gate.ts";
 const TASK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export interface FactoryOptions {
-  /** Directory for `ledger.jsonl` and `report-<task>-<n>.md` files. */
+  /** Directory for `ledger.jsonl`, `report-<task>-<n>.md` and `gate-<task>-<n>.log` files. */
   stateDir: string;
   /** Gate timeout override (ms). Defaults to DEFAULT_GATE_TIMEOUT_MS. */
   timeoutMs?: number;
+  /** Fresh-eyes total budget override (ms), both tries together. Defaults to EYE_TOTAL_BUDGET_MS. */
+  eyeBudgetMs?: number;
 }
 
 export interface ContractInput {
@@ -34,11 +37,19 @@ export interface ContractInput {
    * behavior. A diff outside the scope is a red Verdict naming the files.
    */
   scope?: string[];
+  /**
+   * Marks the fresh-eyes pass ON for this task (ADR 0005: off unless marked).
+   * The eye's model and key are plugin-level config (`<stateDir>/eye.json`),
+   * never Contract fields.
+   */
+  freshEyes?: true;
 }
 
 export interface ClaimInput {
   task: string;
   sha: string;
+  /** Who claimed, when the caller knows it — recorded on `claim_reported` (ticket 02b). */
+  agent?: string;
 }
 
 export interface ClaimOutcome {
@@ -88,10 +99,13 @@ export function createFactory(options: FactoryOptions): Factory {
     stateDir,
     recoveredAttempts,
 
-    setContract({ task, workspace, gate, artifact, scope }) {
+    setContract({ task, workspace, gate, artifact, scope, freshEyes }) {
       assertTaskId(task);
       if (gate.trim() === "") throw new FactoryError("invalid-contract", "gate command must be a non-empty string");
       if (artifact.trim() === "") throw new FactoryError("invalid-contract", "artifact path must be a non-empty string");
+      if (freshEyes !== undefined && freshEyes !== true) {
+        throw new FactoryError("invalid-contract", "freshEyes marks the pass ON — omit it, or set it to exactly true");
+      }
       if (!isAbsolute(workspace)) {
         throw new FactoryError("invalid-contract", `workspace "${workspace}" must be an absolute path`);
       }
@@ -104,7 +118,6 @@ export function createFactory(options: FactoryOptions): Factory {
       if (!isDirectory) {
         throw new FactoryError("invalid-contract", `workspace "${workspace}" must be an existing directory`);
       }
-      let base: string | undefined;
       if (scope !== undefined && scope.length > 0) {
         const unusable =
           !Array.isArray(scope) ||
@@ -118,9 +131,23 @@ export function createFactory(options: FactoryOptions): Factory {
         if (unusable) {
           throw new FactoryError("invalid-contract", "scope must be an array of workspace-relative path prefixes");
         }
-        base = headCommitSync(workspace);
-        if (base === undefined) {
-          throw new FactoryError("invalid-contract", "a scoped contract requires a git workspace with a resolvable HEAD");
+      }
+      // The base commit is recorded on every Contract since v0.0.2 (ticket 03
+      // R2): it is the diff range for the scope check and the fresh-eyes pass.
+      const base = headCommitSync(workspace);
+      if (base === undefined) {
+        throw new FactoryError(
+          "invalid-contract",
+          "the workspace must be a git workspace with a resolvable HEAD — the Contract's base commit is the diff base for the scope check and the fresh-eyes pass",
+        );
+      }
+      // Fresh-eyes fails fast here: marking a Contract without a usable eye
+      // must error before any Agent work starts, not 60s into a green claim
+      // (ticket 04 §3).
+      if (freshEyes === true) {
+        const eye = loadEyeConfig(stateDir);
+        if (!eye.ok) {
+          throw new FactoryError("eye-unconfigured", `fresh-eyes is on, but the eye is not usable: ${eye.reason}`);
         }
       }
       const existing = ledger.eventsFor(task).some((e) => e.event === "contract_set");
@@ -136,11 +163,13 @@ export function createFactory(options: FactoryOptions): Factory {
         workspace,
         gate,
         artifact,
-        ...(base === undefined ? {} : { scope: scope as string[], base }),
+        ...(scope === undefined || scope.length === 0 ? {} : { scope }),
+        base,
+        ...(freshEyes === undefined ? {} : { freshEyes }),
       });
     },
 
-    async claim({ task, sha }) {
+    async claim({ task, sha, agent }) {
       assertTaskId(task);
       const history = ledger.eventsFor(task);
       const contract = history.findLast((e): e is ContractSet => e.event === "contract_set");
@@ -157,7 +186,13 @@ export function createFactory(options: FactoryOptions): Factory {
       }
       const attempt = lastAttempt + 1;
 
-      ledger.append({ event: "claim_reported", task, attempt, sha });
+      ledger.append({
+        event: "claim_reported",
+        task,
+        attempt,
+        sha,
+        ...(agent === undefined || agent.trim() === "" ? {} : { agent }),
+      });
       ledger.append({ event: "gate_started", task, attempt, cmd: contract.gate });
 
       // Station 1 — the claimed commit must exist as one full object. An empty,
@@ -165,14 +200,7 @@ export function createFactory(options: FactoryOptions): Factory {
       // command never runs on an unverified tree.
       const resolved = await resolveClaimedCommit(contract.workspace, sha);
       if (!resolved.ok) {
-        return finish(
-          task,
-          attempt,
-          ledger,
-          stateDir,
-          { exit: null, verdict: "red", note: resolved.reason, timedOut: false },
-          undefined,
-        );
+        return finish(task, attempt, ledger, stateDir, contract, { exit: null, verdict: "red", note: resolved.reason, timedOut: false }, undefined);
       }
 
       // Station 2 — clean tree, HEAD at the claimed commit, before the gate.
@@ -183,6 +211,7 @@ export function createFactory(options: FactoryOptions): Factory {
           attempt,
           ledger,
           stateDir,
+          contract,
           {
             exit: null,
             verdict: "red",
@@ -221,6 +250,7 @@ export function createFactory(options: FactoryOptions): Factory {
           attempt,
           ledger,
           stateDir,
+          contract,
           {
             exit: result.exit,
             verdict: "red",
@@ -241,6 +271,7 @@ export function createFactory(options: FactoryOptions): Factory {
             attempt,
             ledger,
             stateDir,
+            contract,
             { exit: result.exit, verdict: "red", note: "scoped contract has no recorded base commit", timedOut: false },
             resolved.full,
           );
@@ -252,6 +283,7 @@ export function createFactory(options: FactoryOptions): Factory {
             attempt,
             ledger,
             stateDir,
+            contract,
             {
               exit: result.exit,
               verdict: "red",
@@ -266,7 +298,7 @@ export function createFactory(options: FactoryOptions): Factory {
         }
       }
 
-      return finish(task, attempt, ledger, stateDir, result, resolved.full);
+      return finish(task, attempt, ledger, stateDir, contract, result, resolved.full, options.eyeBudgetMs);
     },
 
     accept({ task, attempt }) {
@@ -301,14 +333,28 @@ export function createFactory(options: FactoryOptions): Factory {
   };
 }
 
-function finish(
+/**
+ * Every Attempt's closing window: the full gate output lands beside the report
+ * (ticket 02a), the Verdict is appended with a pointer to it, and — when the
+ * Contract marks fresh-eyes and the Verdict is green — the eye's one advisory
+ * pass runs before the report, so the report is written once, already
+ * containing the eye's line (ticket 03 §2).
+ */
+async function finish(
   task: string,
   attempt: number,
   ledger: Ledger,
   stateDir: string,
+  contract: ContractSet,
   result: GateResult,
   sha: string | undefined,
-): ClaimOutcome {
+  eyeBudgetMs?: number,
+): Promise<ClaimOutcome> {
+  let outputPath: string | undefined;
+  if (result.output !== undefined) {
+    outputPath = join(stateDir, `gate-${task}-${attempt}.log`);
+    writeFileSync(outputPath, result.output);
+  }
   const gate = ledger.append({
     event: "gate_finished",
     task,
@@ -317,7 +363,20 @@ function finish(
     verdict: result.verdict,
     note: result.note,
     ...(sha === undefined ? {} : { sha }),
+    ...(outputPath === undefined ? {} : { outputPath }),
   });
+  if (contract.freshEyes === true && result.verdict === "green" && sha !== undefined) {
+    const eye = await runFreshEyesPass({ stateDir, contract, claimedSha: sha, gateOutputPath: outputPath, budgetMs: eyeBudgetMs });
+    ledger.append({
+      event: "fresh_eyes_written",
+      task,
+      attempt,
+      model: eye.model,
+      outcome: eye.outcome,
+      finding: eye.finding,
+      durationMs: eye.durationMs,
+    });
+  }
   const reportPath = writeAttemptReport(task, attempt, ledger, stateDir);
   return { attempt, verdict: result.verdict, gate, reportPath };
 }
@@ -346,9 +405,10 @@ function attemptEvents(history: readonly LedgerEvent[], attempt: number): Ledger
 }
 
 /**
- * An Attempt is open while its report is not written — after gate_finished the
- * report lands in the same synchronous turn, so in practice this means "the
- * gate is running" (the only await between gate_started and report_written).
+ * An Attempt is open while its report is not written. Between gate_started and
+ * report_written there are two awaits — the gate and, on a green fresh-eyes
+ * Contract, the eye's pass — so an open Attempt usually means one of them is
+ * running.
  */
 function attemptIsOpen(history: readonly LedgerEvent[], attempt: number): boolean {
   const events = attemptEvents(history, attempt);
@@ -357,9 +417,12 @@ function attemptIsOpen(history: readonly LedgerEvent[], attempt: number): boolea
 
 /**
  * ADR 0003 recovery, run once when the factory opens its ledger: any Attempt
- * that never reached its report is closed red and reported, because no green
- * was ever established — red is the fact, not a guess. This is what a plugin
- * restart mid-gate looks like in the ledger when the smoke clears.
+ * that never reached its report gets one now. An Attempt with no gate_finished
+ * was interrupted before any green was established — red is the fact, not a
+ * guess. An Attempt that already has its gate_finished (a restart during the
+ * fresh-eyes pass is the one window where that happens) gets only its missing
+ * report — never a second gate_finished over a verdict that already landed
+ * (ticket 03 R1).
  */
 function recoverInterruptedAttempts(ledger: Ledger, stateDir: string): { task: string; attempt: number }[] {
   const recovered: { task: string; attempt: number }[] = [];
@@ -368,17 +431,21 @@ function recoverInterruptedAttempts(ledger: Ledger, stateDir: string): { task: s
     const history = ledger.eventsFor(task);
     for (let attempt = 1; attempt <= maxAttempt(history); attempt++) {
       if (!attemptIsOpen(history, attempt)) continue;
-      const gateStarted = attemptEvents(history, attempt).some((e) => e.event === "gate_started");
-      ledger.append({
-        event: "gate_finished",
-        task,
-        attempt,
-        exit: null,
-        verdict: "red",
-        note: gateStarted
-          ? "interrupted — the factory restarted before the Gate finished"
-          : "interrupted — the factory restarted before the Gate started",
-      });
+      const events = attemptEvents(history, attempt);
+      const gateStarted = events.some((e) => e.event === "gate_started");
+      const alreadyFinished = events.some((e) => e.event === "gate_finished");
+      if (!alreadyFinished) {
+        ledger.append({
+          event: "gate_finished",
+          task,
+          attempt,
+          exit: null,
+          verdict: "red",
+          note: gateStarted
+            ? "interrupted — the factory restarted before the Gate finished"
+            : "interrupted — the factory restarted before the Gate started",
+        });
+      }
       writeAttemptReport(task, attempt, ledger, stateDir);
       recovered.push({ task, attempt });
     }

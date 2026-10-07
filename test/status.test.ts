@@ -122,13 +122,16 @@ test("status prints one line per task in first-appearance order, including mid-g
     contractEvent(1, "T-BETA"),
     { seq: 2, ts, event: "contract_set", task: "T-ALPHA", workspace: "/tmp/ws", gate: "true", artifact: "a" },
     contractEvent(3, "T-GAMMA"),
-    { seq: 4, ts, event: "claim_reported", task: "T-BETA", attempt: 1, sha: full },
+    { seq: 4, ts, event: "claim_reported", task: "T-BETA", attempt: 1, sha: full, agent: "agent-1" },
     { seq: 5, ts, event: "gate_started", task: "T-BETA", attempt: 1, cmd: "true" },
     { seq: 6, ts, event: "gate_finished", task: "T-BETA", attempt: 1, exit: 0, verdict: "green", note: "", sha: full },
-    { seq: 7, ts, event: "report_written", task: "T-BETA", attempt: 1, path: "/s/report-T-BETA-1.md" },
-    { seq: 8, ts, event: "attempt_accepted", task: "T-BETA", attempt: 1 },
-    { seq: 9, ts, event: "claim_reported", task: "T-ALPHA", attempt: 1, sha: full },
-    { seq: 10, ts, event: "gate_started", task: "T-ALPHA", attempt: 1, cmd: "true" },
+    // v0.0.2's advisory line: status must read through it — the task view does
+    // not change because of the eye.
+    { seq: 7, ts, event: "fresh_eyes_written", task: "T-BETA", attempt: 1, model: "gemini-3.8-flash-high", outcome: "clear", finding: "nothing to add.", durationMs: 900 },
+    { seq: 8, ts, event: "report_written", task: "T-BETA", attempt: 1, path: "/s/report-T-BETA-1.md" },
+    { seq: 9, ts, event: "attempt_accepted", task: "T-BETA", attempt: 1 },
+    { seq: 10, ts, event: "claim_reported", task: "T-ALPHA", attempt: 1, sha: full },
+    { seq: 11, ts, event: "gate_started", task: "T-ALPHA", attempt: 1, cmd: "true" },
     // ...and no gate_finished for T-ALPHA: its attempt is still open.
   ]);
 
