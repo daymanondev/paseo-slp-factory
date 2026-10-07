@@ -1,0 +1,154 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { createFactory } from "../plugin/server/core/factory.ts";
+import { startSpool } from "../plugin/server/spool.ts";
+import { copyFixture, disposeDir, gitCommitAll, gitCommitChanges, makeTempDir, repoRoot } from "./helpers.ts";
+
+/**
+ * The mechanical DoD of ticket 08 without a daemon: the real CLIs
+ * (`factory.mjs` for the Owner, `factory-claim.mjs` for the Agent) talk to the
+ * real plugin-side spool loop over the same files the daemon would host. This
+ * is also the drift guard between the two halves of the spool protocol, which
+ * are implemented once in TypeScript and once in plain .mjs.
+ */
+
+const claimCli = join(repoRoot, "plugin", "bin", "factory-claim.mjs");
+const ownerCli = join(repoRoot, "plugin", "bin", "factory.mjs");
+
+interface CliResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/** Async on purpose: a sync spawn would block this process's event loop, and the spool poll lives here. */
+function run(script: string, args: string[], extraEnv: Record<string, string>): Promise<CliResult> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...extraEnv } });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    const killer = setTimeout(() => child.kill("SIGKILL"), 120_000);
+    child.on("close", (status) => {
+      clearTimeout(killer);
+      resolve({ status, stdout, stderr });
+    });
+  });
+}
+
+test("the whole loop over the spool: contract → red claim → green claim → accept", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const workspace = join(dir, "workspace");
+  copyFixture("sample-workspace", workspace);
+  const brokenSha = gitCommitAll(workspace);
+  const home = join(dir, "paseo-home");
+  const stateDir = join(home, "plugin-state", "paseo-factory");
+
+  const factory = createFactory({ stateDir });
+  const spool = startSpool(stateDir, factory);
+  t.after(() => spool.stop());
+
+  const ownerEnv = { PASEO_HOME: home };
+  const agentEnv = { FACTORY_STATE_DIR: stateDir, PASEO_AGENT_ID: "agent-test-1" };
+
+  // The Owner fixes the Workspace in the Contract — the Agent never picks a cwd.
+  const contract = await run(ownerCli, [
+    "contract", "--task", "LOOP1", "--workspace", workspace, "--gate", "npm test", "--artifact", "src/format.ts",
+  ], ownerEnv);
+  assert.equal(contract.status, 0, contract.stderr);
+  assert.match(contract.stdout, /contract set for LOOP1/);
+
+  // Attempt 1: the agent claims unfinished work — the factory says red, with the note.
+  const red = await run(claimCli, ["--task", "LOOP1", "--sha", brokenSha], agentEnv);
+  assert.equal(red.status, 1, `red verdict must exit 1\nstdout: ${red.stdout}\nstderr: ${red.stderr}`);
+  assert.match(red.stdout, /LOOP1 attempt 1 — RED/);
+  assert.match(red.stdout, /report: .*report-LOOP1-1\.md/);
+  assert.match(red.stdout, /note: .+fail 2/, "the agent sees the real gate note");
+
+  // The agent fixes the work for real and claims the new commit.
+  writeFileSync(
+    join(workspace, "src", "format.ts"),
+    [
+      "export function pad(input: string, width: number): string {",
+      "  if (input.length >= width) return input.slice(0, width);",
+      "  return input + \" \".repeat(width - input.length);",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  const fixedSha = gitCommitChanges(workspace, "fix pad to truncate and pad correctly");
+  const green = await run(claimCli, ["--task", "LOOP1", "--sha", fixedSha], agentEnv);
+  assert.equal(green.status, 0, `green verdict must exit 0\nstdout: ${green.stdout}\nstderr: ${green.stderr}`);
+  assert.match(green.stdout, /LOOP1 attempt 2 — GREEN/);
+
+  // The Owner accepts the green attempt; acceptance is not the agent's act.
+  const accept = await run(ownerCli, ["accept", "LOOP1", "--attempt", "2"], ownerEnv);
+  assert.equal(accept.status, 0, accept.stderr);
+  assert.match(accept.stdout, /LOOP1 accepted at attempt 2/);
+
+  const events = factory.ledger.eventsFor("LOOP1").map((e) => e.event);
+  assert.deepEqual(events, [
+    "contract_set",
+    "claim_reported", "gate_started", "gate_finished", "report_written",
+    "claim_reported", "gate_started", "gate_finished", "report_written",
+    "attempt_accepted",
+  ]);
+  assert.ok(existsSync(join(stateDir, "report-LOOP1-1.md")));
+  assert.ok(existsSync(join(stateDir, "report-LOOP1-2.md")));
+  const contractEvent = factory.ledger.eventsFor("LOOP1")[0];
+  assert.equal(contractEvent.event === "contract_set" ? contractEvent.workspace : undefined, workspace);
+});
+
+test("a claim the factory rejects comes back as an error exit with the reason", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const stateDir = join(dir, "state");
+  const factory = createFactory({ stateDir });
+  const spool = startSpool(stateDir, factory);
+  t.after(() => spool.stop());
+
+  const rejected = await run(claimCli, ["--task", "NOPE", "--sha", "a1b2c3d"], { FACTORY_STATE_DIR: stateDir });
+  assert.equal(rejected.status, 2);
+  assert.match(rejected.stderr, /no contract set for task NOPE/);
+});
+
+test("the owner CLI refuses bad usage before submitting anything", async () => {
+  const noTask = await run(ownerCli, ["contract", "--workspace", "/w", "--gate", "true", "--artifact", "a"], {});
+  assert.equal(noTask.status, 2);
+  assert.match(noTask.stderr, /--task is required/);
+
+  const badAttempt = await run(ownerCli, ["accept", "T1", "--attempt", "zero"], {});
+  assert.equal(badAttempt.status, 2);
+  assert.match(badAttempt.stderr, /--attempt must be a positive integer/);
+
+  const unknown = await run(ownerCli, ["teleport"], {});
+  assert.equal(unknown.status, 2);
+  assert.match(unknown.stderr, /unknown command "teleport"/);
+});
+
+test("factory-claim usage: --help exits 0, a missing --sha exits 2", async () => {
+  const help = await run(claimCli, ["--help"], {});
+  assert.equal(help.status, 0);
+  assert.match(help.stdout, /usage: factory-claim --task <id> --sha <commit-sha>/);
+
+  const bad = await run(claimCli, ["--task", "T1"], {});
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /--task and --sha are both required/);
+});
+
+test("a claim with no plugin answering times out honestly and exits 2", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const stateDir = join(dir, "state");
+
+  const result = await run(claimCli, ["--task", "T1", "--sha", "abc", "--wait-secs", "1"], { FACTORY_STATE_DIR: stateDir });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /no reply from the factory plugin/);
+  assert.match(result.stderr, /do not resubmit/);
+  assert.ok(existsSync(join(stateDir, "spool", "requests")), "the request is durably queued, not lost");
+});

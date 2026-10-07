@@ -1,17 +1,20 @@
 /**
  * paseo-factory plugin server entry — the shell around the pure core.
  *
- * v0.0.1 scope (ticket 06): prove the plumbing on a 0.10 daemon. This entry
- * boots visibly, resolves the daemon-scoped state root, opens the ledger
- * through the vendored core, puts the Claim CLI on every agent's PATH
- * (ADR 0004), and nothing else. Wiring the loop is ticket 08.
+ * The plugin process owns the whole loop (ADR 0004): it opens the ledger once
+ * at boot (recovering interrupted attempts per ADR 0003), keeps the factory
+ * instance for its lifetime as the single Ledger writer and Gate runner, and
+ * serves the spool that the CLIs submit through. It also puts the Claim CLI
+ * on every agent's PATH. The Owner reaches the same loop through
+ * `plugin/bin/factory.mjs` (`contract`, `accept`), which is never on an agent
+ * PATH.
  */
 import { homedir } from "node:os";
-import { join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { Ledger } from "./server/core/ledger.ts";
+import { createFactory } from "./server/core/factory.ts";
 import { PLUGIN_ID, pluginDirFor, resolvePaseoHome, stateDirFor } from "./server/paths.ts";
 import { claimCliBinDir, ensureClaimCli, injectClaimCliPath } from "./server/shell.ts";
+import { spoolRootFor, startSpool } from "./server/spool.ts";
 
 const SHELL_VERSION = "0.0.1";
 
@@ -22,10 +25,13 @@ export default function contribute(server: PluginServerContext) {
   const stateDir = stateDirFor(home);
   const pluginDir = pluginDirFor(home);
 
-  // Opening validates any existing ledger and fails the plugin on corruption
-  // — fail closed, loudly, never silently degrade (no component dies
-  // silently). Ticket 08 turns this into the long-lived factory instance.
-  Ledger.open(join(stateDir, "ledger.jsonl"));
+  // Opening validates any existing ledger (fail closed — a corrupt ledger
+  // fails the plugin loudly) and closes attempts interrupted by a previous
+  // lifetime: red, reported, and logged, never silently dropped (ADR 0003).
+  const factory = createFactory({ stateDir });
+  for (const { task, attempt } of factory.recoveredAttempts) {
+    log(`recovered on open: attempt ${attempt} of ${task} closed red — interrupted by a restart`);
+  }
 
   if (pluginDir === undefined) {
     log(`up v${SHELL_VERSION} — WARNING: plugin directory not recorded in ${home}/config.json; ` +
@@ -34,6 +40,9 @@ export default function contribute(server: PluginServerContext) {
     ensureClaimCli(stateDir, pluginDir, process.execPath);
     log(`up v${SHELL_VERSION} — state ${stateDir}, plugin ${pluginDir}, claim CLI ${claimCliBinDir(stateDir)}`);
   }
+
+  const spool = startSpool(stateDir, factory, { onLog: log });
+  log(`spool listening on ${spoolRootFor(stateDir)}/{requests,replies,processed}`);
 
   const offSessionOpen = server.before("agent.session_open", ({ request }) => {
     if (pluginDir === undefined) return undefined;
@@ -46,6 +55,7 @@ export default function contribute(server: PluginServerContext) {
 
   return () => {
     offSessionOpen();
+    spool.stop();
     log(`down v${SHELL_VERSION}`);
   };
 }

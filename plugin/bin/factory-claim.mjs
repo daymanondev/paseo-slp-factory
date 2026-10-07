@@ -2,18 +2,30 @@
 /**
  * factory-claim — the Agent's single factory command (ADR 0004).
  *
- * v0.0.1 stub (ticket 06): parses the real argument surface and reports that
- * nothing was submitted. Ticket 08 replaces the body with a spool submit to
- * the plugin; the wrapper that puts this script on agent PATHs execs it with
- * the daemon's node binary, so the shebang only matters for direct dev runs.
+ * Claims that a task is finished at a specific commit. The factory does not
+ * trust the claim: the plugin resolves the sha, checks the Workspace sits
+ * clean at it, runs the contract's gate, and records the verdict in the
+ * ledger with a report. This CLI only submits the claim through the spool and
+ * prints what the factory answered.
+ *
+ * The generated wrapper at `<stateDir>/bin/factory-claim` execs this script
+ * with the daemon's node binary and `FACTORY_STATE_DIR` baked in, so agents
+ * never need to know where state lives. Direct dev runs must set
+ * `FACTORY_STATE_DIR` (or `PASEO_HOME`) themselves.
+ *
+ * Exit codes: 0 verdict GREEN · 1 verdict RED · 2 not processed (bad usage,
+ * rejected, or the plugin never answered).
  */
 import { parseArgs } from "node:util";
+import { awaitReply, randomId, resolveHome, spoolRootFor, stateDirFor, submit } from "./spool-client.mjs";
 
-const usage = `usage: factory-claim --task <id> --sha <commit-sha>
+const usage = `usage: factory-claim --task <id> --sha <commit-sha> [--wait-secs <n>]
 
 Claim that the task is finished at a specific commit. The factory does not
 trust the claim: it runs the contract's gate at the claimed commit and
 records the verdict (paseo-factory v0.0.1).`;
+
+const DEFAULT_WAIT_SECS = 600; // gate timeout default is 300s — leave headroom
 
 let args;
 try {
@@ -22,6 +34,7 @@ try {
     options: {
       task: { type: "string" },
       sha: { type: "string" },
+      "wait-secs": { type: "string", default: String(DEFAULT_WAIT_SECS) },
       help: { type: "boolean", default: false },
     },
   });
@@ -40,8 +53,45 @@ if (typeof args.values.task !== "string" || typeof args.values.sha !== "string")
   process.exit(2);
 }
 
-console.log(
-  `factory-claim: received task ${args.values.task} at ${args.values.sha}, ` +
-    `but the factory loop is not wired yet — nothing was submitted (ticket 08).`,
-);
-process.exit(1);
+const waitSecs = Number(args.values["wait-secs"]);
+if (!Number.isFinite(waitSecs) || waitSecs <= 0) {
+  console.error(`factory-claim: --wait-secs must be a positive number\n\n${usage}`);
+  process.exit(2);
+}
+
+const stateDir = process.env.FACTORY_STATE_DIR ?? stateDirFor(resolveHome());
+const spoolRoot = spoolRootFor(stateDir);
+
+const request = {
+  id: randomId(),
+  kind: "claim",
+  task: args.values.task,
+  sha: args.values.sha,
+  ...(process.env.PASEO_AGENT_ID === undefined ? {} : { agent: process.env.PASEO_AGENT_ID }),
+};
+
+submit(spoolRoot, request);
+const reply = await awaitReply(spoolRoot, request.id, waitSecs * 1000);
+
+if (reply === null) {
+  console.error(
+    `factory-claim: no reply from the factory plugin after ${waitSecs}s — it may be down, or the gate may still be queued.\n` +
+      `The claim (${request.id}) stays in the spool and may still be processed; do not resubmit blindly, ` +
+      `that would open another attempt. Ask the Owner to check the plugin.`,
+  );
+  process.exit(2);
+}
+
+if (!reply.ok) {
+  console.error(`factory-claim: ${reply.message}`);
+  process.exit(2);
+}
+
+console.log(`factory-claim: task ${args.values.task} attempt ${reply.attempt} — ${reply.verdict.toUpperCase()}`);
+if (reply.note !== undefined && reply.note !== "") {
+  console.log(`note: ${reply.note}`);
+}
+if (reply.reportPath !== undefined) {
+  console.log(`report: ${reply.reportPath}`);
+}
+process.exit(reply.verdict === "green" ? 0 : 1);

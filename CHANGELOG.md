@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The wired loop (ticket 08, ADR 0004): the plugin process is the single
+  Ledger writer and Gate runner, and the CLIs only submit through
+  `stateDir/spool/` (`requests/` → `replies/` → `processed/`, atomic writes,
+  request ids so a replayed request never starts a second Gate). Three real
+  CLIs replace the stub and the planned MCP tools:
+  - `factory contract --task --workspace --gate --artifact [--scope]` — the
+    Owner fixes the Workspace (absolute, existing directory) in the Contract.
+  - `factory accept <task> --attempt <n>` — the Owner accepts one green
+    Attempt (new `attempt_accepted` ledger event; red attempts, unknown
+    attempts and double acceptance are refused).
+  - `factory-claim --task --sha` — the Agent's single command; prints verdict,
+    gate note and report path (exit 0 green / 1 red / 2 not processed). The
+    PATH wrapper now bakes in `FACTORY_STATE_DIR`.
+  - `scripts/smoke-loop.mjs --home <trial home>` — the mechanical DoD: contract
+    → red claim → fixed green claim → accept against a live daemon, asserting
+    the ledger sequence and per-attempt reports.
+- ADR 0003 ledger shape, completed: every event carries `ts` (ISO 8601 UTC,
+  stamped by the ledger); Tasks have numbered Attempts — each Claim opens the
+  next one, a Claim while the previous Attempt is open is rejected, and each
+  Attempt gets its own `report-<task>-<n>.md`. On open, an unterminated last
+  ledger line is moved to `<ledger>.quarantine`, and an Attempt interrupted by
+  a restart (e.g. mid-gate) is closed red and reported.
 - Plugin shell (ticket 06): the Paseo plugin that loads on a 0.10 daemon
   (`paseo-plugin.json`, `requirements.paseo >=0.10.0 <0.11.0`). The server entry
   logs a startup banner, resolves the state root under the daemon home

@@ -1,4 +1,4 @@
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
+import { appendFileSync, closeSync, fsyncSync, ftruncateSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import { FactoryError } from "./errors.ts";
 import { EVENT_NAMES } from "./events.ts";
@@ -11,6 +11,13 @@ import type { LedgerEvent, PendingEvent } from "./events.ts";
  * One instance per file per process: two `open` calls on the same path keep
  * independent seq counters and would collide. The v0.0.1 shell holds exactly
  * one factory (and therefore one ledger) per daemon.
+ *
+ * `append` stamps every event with `ts` (ISO 8601 UTC, ADR 0003) and returns
+ * only after the line *and* its `\n` are fsynced. That promise is what makes
+ * the one recovery we allow honest: a last line with no trailing newline was
+ * never acknowledged to anyone, so on open it is moved to
+ * `<path>.quarantine` and dropped (ADR 0003). Any other damage still refuses
+ * to open.
  */
 export class Ledger {
   readonly #path: string;
@@ -34,6 +41,10 @@ export class Ledger {
       else throw err;
     }
 
+    if (raw !== "" && !raw.endsWith("\n")) {
+      raw = quarantineUnterminatedTail(path, raw);
+    }
+
     const events: LedgerEvent[] = [];
     if (raw !== "") {
       const lines = raw.split("\n");
@@ -55,11 +66,13 @@ export class Ledger {
           typeof evt === "object" &&
           evt !== null &&
           typeof (evt as { seq?: unknown }).seq === "number" &&
-          Number.isInteger((evt as { seq?: unknown }).seq) &&
+          Number.isInteger((evt as { seq: number }).seq) &&
           (evt as { seq: number }).seq > prevSeq &&
           typeof (evt as { event?: unknown }).event === "string" &&
           (EVENT_NAMES as readonly string[]).includes((evt as { event: string }).event) &&
-          typeof (evt as { task?: unknown }).task === "string";
+          typeof (evt as { task?: unknown }).task === "string" &&
+          typeof (evt as { ts?: unknown }).ts === "string" &&
+          attemptIsValid(evt);
         if (!valid) {
           throw new FactoryError("corrupted-ledger", `line ${i + 1} of ${path} is not a valid ledger event`);
         }
@@ -70,9 +83,9 @@ export class Ledger {
     return new Ledger(path, events);
   }
 
-  /** Assigns the next seq, appends one JSONL line, fsyncs, and returns the event. */
-  append<T extends PendingEvent>(evt: T): T & { seq: number } {
-    const record = { seq: this.#nextSeq, ...evt } as T & { seq: number };
+  /** Assigns the next seq, stamps `ts`, appends one JSONL line, fsyncs, and returns the event. */
+  append<T extends PendingEvent>(evt: T): T & { seq: number; ts: string } {
+    const record = { seq: this.#nextSeq, ts: new Date().toISOString(), ...evt } as T & { seq: number; ts: string };
     const line = `${JSON.stringify(record)}\n`;
     // O_APPEND + a single write makes the line land atomically at EOF; fsync
     // puts it on disk before append returns. Sync I/O also keeps seq assignment
@@ -100,4 +113,33 @@ export class Ledger {
   eventsFor(task: string): LedgerEvent[] {
     return this.#events.filter((e) => e.task === task);
   }
+}
+
+/** Post-Contract events carry an Attempt number, a positive integer (ADR 0003). */
+function attemptIsValid(evt: LedgerEvent): boolean {
+  if (evt.event === "contract_set") return true;
+  const attempt = (evt as { attempt?: unknown }).attempt;
+  return typeof attempt === "number" && Number.isInteger(attempt) && attempt >= 1;
+}
+
+/**
+ * Moves the unterminated tail of the ledger file to `<path>.quarantine` and
+ * truncates the ledger to its last complete line. Returns the surviving
+ * content. The quarantined bytes are kept verbatim for inspection — nothing is
+ * silently lost, and nothing half-written is trusted.
+ */
+function quarantineUnterminatedTail(path: string, raw: string): string {
+  const lastNewline = raw.lastIndexOf("\n");
+  const complete = lastNewline === -1 ? "" : raw.slice(0, lastNewline + 1);
+  const tail = raw.slice(lastNewline + 1);
+  appendFileSync(`${path}.quarantine`, `${tail}\n`);
+  const fd = openSync(path, "r+");
+  try {
+    writeSync(fd, complete);
+    ftruncateSync(fd, Buffer.byteLength(complete));
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  return complete;
 }

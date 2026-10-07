@@ -2,14 +2,15 @@ import { FactoryError } from "./errors.ts";
 import type { ClaimReported, ContractSet, GateFinished, LedgerEvent } from "./events.ts";
 
 /**
- * Renders `report-<task>.md` from ledger events — every content line traces to
- * one: contract line ← contract_set, claim ← claim_reported, attested commit ←
- * gate_finished.sha, verdict ← the gate verdict. The report states evidence
- * and stops there: green is not acceptance (ADR 0002), so no line concludes
- * "DONE".
+ * Renders `report-<task>-<n>.md` from ledger events — every content line traces
+ * to one: contract line ← contract_set, claim ← claim_reported, attested commit ←
+ * gate_finished.sha, verdict ← the gate verdict. Timestamps come from events,
+ * not render time (ADR 0003); the header carries the moment the Verdict was
+ * established. The report states evidence and stops there: green is not
+ * acceptance (ADR 0002), so no line concludes "DONE".
  */
-export function renderReport(task: string, events: readonly LedgerEvent[], now: Date = new Date()): string {
-  const mine = events.filter((e) => e.task === task);
+export function renderReport(task: string, attempt: number, events: readonly LedgerEvent[]): string {
+  const mine = events.filter((e) => e.task === task && (e.event === "contract_set" || ("attempt" in e && e.attempt === attempt)));
   const contract = mine.findLast((e): e is ContractSet => e.event === "contract_set");
   const claim = mine.findLast((e): e is ClaimReported => e.event === "claim_reported");
   const gate = mine.findLast((e): e is GateFinished => e.event === "gate_finished");
@@ -22,15 +23,23 @@ export function renderReport(task: string, events: readonly LedgerEvent[], now: 
     ]
       .filter((name): name is string => name !== null)
       .join(", ");
-    throw new FactoryError("incomplete-history", `cannot render report for ${task}: missing ${missing}`);
+    throw new FactoryError("incomplete-history", `cannot render report for ${task} attempt ${attempt}: missing ${missing}`);
   }
 
+  const totalAttempts = new Set(
+    events
+      .filter((e): e is Exclude<LedgerEvent, ContractSet> => e.task === task && e.event !== "contract_set")
+      .map((e) => e.attempt),
+  ).size;
+
   const lines = [
-    `# ${task} — ${formatTimestamp(now)}`,
+    `# ${task} — ${formatTimestamp(gate.ts)}`,
+    `- Attempt: ${attempt} of ${totalAttempts}`,
     `- Contract: \`${contract.gate}\` green · file \`${contract.artifact}\` exists${
       contract.scope === undefined ? "" : ` · scope: ${contract.scope.map((s) => `\`${s}\``).join(", ")}`
     }`,
-    `- Agent claimed @ ${claim.sha}`,
+    `- Workspace: ${contract.workspace}`,
+    `- Claimed @ ${formatTimestamp(claim.ts)}: ${claim.sha}`,
     ...(gate.sha === undefined ? [] : [`- Attested commit: \`${gate.sha}\``]),
     `- Verdict: ${gate.verdict.toUpperCase()} — ${gate.note}`,
     gate.verdict === "green"
@@ -40,7 +49,8 @@ export function renderReport(task: string, events: readonly LedgerEvent[], now: 
   return `${lines.join("\n")}\n`;
 }
 
-function formatTimestamp(d: Date): string {
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
 }

@@ -9,14 +9,23 @@
 - **The plugin process is the only writer of the Ledger and the only runner of Gates.**
   The Owner's CLI (`factory contract`, `factory accept`) and the Agent's CLI
   (`factory-claim`) never touch the Ledger: they drop a request file into
-  `stateDir/spool/requests/` and wait for the reply. Each request carries an id, so a
-  retried call never starts a second Gate.
+  `stateDir/spool/requests/` and wait for the reply. Each request carries an
+  id, so a retried call never starts a second Gate. *(Amended 2026-10-07,
+  ticket 08, to match what shipped: the id dedupes replayed request files —
+  a request whose reply already exists is moved along unprocessed. A fresh CLI
+  invocation is a new request by design: it opens the next numbered Attempt,
+  so every gate run is recorded in the ledger rather than silently deduped.
+  A cache that returns an old verdict for a re-claimed commit was rejected:
+  a red caused by a dirty tree must be re-claimable after cleanup, same sha
+  and all.)*
 - **The Agent gets the Claim as a CLI on its `PATH`**, put there by the plugin's
   `agent.session_open` before-hook — not as an MCP tool. It accepts only `--task` and
   `--sha`. *(Amended 2026-10-07, ticket 06: the original wording said `agent.create`;
   that hook's `env` is not re-applied on resume, while `agent.session_open` fires for
   create, resume, refresh and import — daemon `agent-manager.js` `buildLaunchContext` —
-  so it is the single injection point.)*
+  so it is the single injection point. Amended 2026-10-07, ticket 08:
+  `--wait-secs` tunes how long the CLI waits for the plugin's reply; it changes
+  nothing the Agent can ask the factory to do.)*
 - **All state lives in `stateDir`, outside the Workspace**: Ledger, spool, Reports.
   Reports inside the Workspace would dirty the tree the next Attempt must find clean, and
   the Agent could edit them.

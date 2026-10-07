@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pluginDirFor, resolvePaseoHome, stateDirFor } from "../plugin/server/paths.ts";
@@ -85,7 +84,11 @@ test("ensureClaimCli writes an executable wrapper around the daemon's node", (t)
   assert.ok(existsSync(wrapper), "wrapper exists at <stateDir>/bin/factory-claim");
   const body = readFileSync(wrapper, "utf8");
   assert.match(body, /^#!\/bin\/sh\n/);
-  assert.match(body, /ELECTRON_RUN_AS_NODE=1 exec '\/daemon\/node' '.*factory-claim\.mjs' "\$@"\n$/);
+  assert.match(
+    body,
+    /ELECTRON_RUN_AS_NODE=1 FACTORY_STATE_DIR='[^']*' exec '\/daemon\/node' '.*factory-claim\.mjs' "\$@"\n$/,
+  );
+  assert.ok(body.includes(shellQuoteFor(stateDir)), "the wrapper bakes in this daemon's state dir");
   const stat = statSync(wrapper);
   assert.equal(stat.mode & 0o111, 0o111, "wrapper is executable");
 
@@ -94,18 +97,28 @@ test("ensureClaimCli writes an executable wrapper around the daemon's node", (t)
   assert.match(readFileSync(wrapper, "utf8"), /'\/daemon\/node-new'/);
 });
 
+function shellQuoteFor(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 test("the vendored core appends one fsynced JSONL line like the root core", (t) => {
   const dir = makeTempDir();
   disposeDir(t, dir);
   const ledger = Ledger.open(join(dir, "ledger.jsonl"));
 
-  const evt = ledger.append({ event: "contract_set", task: "T1", gate: "npm test", artifact: "src/format.ts" });
+  const evt = ledger.append({ event: "contract_set", task: "T1", workspace: "/tmp/ws", gate: "npm test", artifact: "src/format.ts" });
 
   assert.equal(evt.seq, 1);
-  assert.equal(
-    readFileSync(join(dir, "ledger.jsonl"), "utf8"),
-    '{"seq":1,"event":"contract_set","task":"T1","gate":"npm test","artifact":"src/format.ts"}\n',
-  );
+  const { ts, ...rest } = JSON.parse(readFileSync(join(dir, "ledger.jsonl"), "utf8")) as { ts?: string };
+  assert.match(String(ts), /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual(rest, {
+    seq: 1,
+    event: "contract_set",
+    task: "T1",
+    workspace: "/tmp/ws",
+    gate: "npm test",
+    artifact: "src/format.ts",
+  });
 });
 
 test("plugin/server/core is a byte-exact copy of src/ (run npm run sync:plugin-core after editing the core)", () => {
@@ -121,22 +134,4 @@ test("plugin/server/core is a byte-exact copy of src/ (run npm run sync:plugin-c
       `plugin/server/core/${name} differs from src/${name}`,
     );
   }
-});
-
-test("factory-claim stub: --help exits 0, a claim reports unwired and exits 1, bad usage exits 2", () => {
-  const script = join(repoRoot, "plugin", "bin", "factory-claim.mjs");
-  const run = (args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
-
-  const help = run(["--help"]);
-  assert.equal(help.status, 0);
-  assert.match(help.stdout, /usage: factory-claim --task <id> --sha <commit-sha>/);
-
-  const claim = run(["--task", "T1", "--sha", "a1b2c3d"]);
-  assert.equal(claim.status, 1);
-  assert.match(claim.stdout, /task T1 at a1b2c3d/);
-  assert.match(claim.stdout, /nothing was submitted/i);
-
-  const bad = run(["--task", "T1"]);
-  assert.equal(bad.status, 2);
-  assert.match(bad.stderr, /--task and --sha are both required/);
 });
