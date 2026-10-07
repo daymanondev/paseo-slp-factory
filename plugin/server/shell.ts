@@ -41,15 +41,20 @@ function shellQuote(value: string): string {
 /**
  * (Re)generate `<stateDir>/bin/factory-claim`. Rewritten when content changes
  * — a daemon update can move the node binary, and the wrapper must follow.
- * The caller skips this entirely when the plugin directory is unknown and
- * logs that loudly instead (no component dies silently).
+ * The wrapper bakes in `FACTORY_STATE_DIR` so the CLI lands in this daemon's
+ * spool no matter which agent process runs it. The caller skips this entirely
+ * when the plugin directory is unknown and logs that loudly instead (no
+ * component dies silently).
  */
 export function ensureClaimCli(stateDir: string, pluginDir: string, nodeBinary: string): void {
   const binDir = claimCliBinDir(stateDir);
   mkdirSync(binDir, { recursive: true });
   const target = join(binDir, "factory-claim");
   const script = join(pluginDir, "bin", "factory-claim.mjs");
-  const body = `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${shellQuote(nodeBinary)} ${shellQuote(script)} "$@"\n`;
+  const body =
+    `#!/bin/sh\n` +
+    `ELECTRON_RUN_AS_NODE=1 FACTORY_STATE_DIR=${shellQuote(stateDir)} ` +
+    `exec ${shellQuote(nodeBinary)} ${shellQuote(script)} "$@"\n`;
   if (existsSync(target) && readFileSync(target, "utf8") === body) return;
   writeFileSync(target, body);
   chmodSync(target, 0o755);

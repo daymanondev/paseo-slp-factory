@@ -6,7 +6,7 @@
  * forever (`research/03-hands-on/04-andrew-room.md` §12).
  */
 export { createFactory } from "./factory.ts";
-export type { Factory, FactoryOptions, ContractInput, ClaimInput, ClaimOutcome } from "./factory.ts";
+export type { Factory, FactoryOptions, ContractInput, ClaimInput, ClaimOutcome, AcceptInput } from "./factory.ts";
 export { resolveClaimedCommit, checkCleanAt } from "./workspace.ts";
 export type { CommitResolution, TreeCheck } from "./workspace.ts";
 export { Ledger } from "./ledger.ts";
@@ -18,6 +18,7 @@ export { DEFAULT_GATE_TIMEOUT_MS, REPORT_NOTE_MAX_CHARS, STDOUT_TAIL_CAP_BYTES }
 export type {
   Verdict,
   EventName,
+  Timestamp,
   LedgerEvent,
   PendingEvent,
   ContractSet,
@@ -25,5 +26,6 @@ export type {
   GateStarted,
   GateFinished,
   ReportWritten,
+  AttemptAccepted,
 } from "./events.ts";
 export { EVENT_NAMES } from "./events.ts";

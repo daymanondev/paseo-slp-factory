@@ -1,27 +1,31 @@
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { Ledger } from "./ledger.ts";
 import { runGate } from "./gate.ts";
 import { renderReport } from "./report.ts";
 import { changesOutsideScope, checkCleanAt, headCommitSync, resolveClaimedCommit } from "./workspace.ts";
 import { FactoryError } from "./errors.ts";
-import type { ContractSet, GateFinished, Verdict } from "./events.ts";
+import type { AttemptAccepted, ContractSet, GateFinished, LedgerEvent, Verdict } from "./events.ts";
 import type { GateResult } from "./gate.ts";
 
 /** Task ids become report filenames, so they stay flat and filename-safe. */
 const TASK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export interface FactoryOptions {
-  /** Directory for `ledger.jsonl` and `report-<task>.md` (the plugin shell will pass the plugin state root). */
+  /** Directory for `ledger.jsonl` and `report-<task>-<n>.md` files. */
   stateDir: string;
-  /** Task workspace — gate cwd and artifact base. Defaults to the process cwd. */
-  workspace?: string;
   /** Gate timeout override (ms). Defaults to DEFAULT_GATE_TIMEOUT_MS. */
   timeoutMs?: number;
 }
 
 export interface ContractInput {
   task: string;
+  /**
+   * The Workspace this Task's work lives in — absolute path, chosen by the
+   * Owner and fixed from here on (ADR 0002 / ticket 08): the Gate's cwd and
+   * the base for the artifact and scope. The Agent never gets to pick a cwd.
+   */
+  workspace: string;
   gate: string;
   artifact: string;
   /**
@@ -38,15 +42,23 @@ export interface ClaimInput {
 }
 
 export interface ClaimOutcome {
+  /** The Attempt this Claim opened — attempts are numbered per task from 1. */
+  attempt: number;
   verdict: Verdict;
   gate: GateFinished;
   reportPath: string;
 }
 
+export interface AcceptInput {
+  task: string;
+  attempt: number;
+}
+
 export interface Factory {
   readonly ledger: Ledger;
   readonly stateDir: string;
-  readonly workspace: string;
+  /** Attempts the factory closed red while opening (ADR 0003 recovery) — for the shell to log loudly. */
+  readonly recoveredAttempts: readonly { task: string; attempt: number }[];
   /** Registers a task's done-criteria. One contract per task — the ledger is append-only. */
   setContract(input: ContractInput): ContractSet;
   /**
@@ -54,25 +66,44 @@ export interface Factory {
    * on it, writes the report. Per ADR 0002 the Verdict attests the claimed
    * commit: the sha is resolved, and the tree must sit clean with HEAD at that
    * commit both before and after the gate. Anything else is red, never a
-   * fallback to whatever is on disk.
+   * fallback to whatever is on disk. Each Call opens the task's next Attempt;
+   * a Claim while the previous Attempt is still open is rejected (ADR 0003).
    */
   claim(input: ClaimInput): Promise<ClaimOutcome>;
+  /**
+   * The Owner accepts one green Attempt (ADR 0002). Green is necessary, not
+   * sufficient — this is the only acceptance act in the factory, and it is
+   * never the Agent's.
+   */
+  accept(input: AcceptInput): AttemptAccepted;
 }
 
 export function createFactory(options: FactoryOptions): Factory {
   const { stateDir } = options;
-  const workspace = options.workspace ?? process.cwd();
   const ledger = Ledger.open(join(stateDir, "ledger.jsonl"));
+  const recoveredAttempts = recoverInterruptedAttempts(ledger, stateDir);
 
   return {
     ledger,
     stateDir,
-    workspace,
+    recoveredAttempts,
 
-    setContract({ task, gate, artifact, scope }) {
+    setContract({ task, workspace, gate, artifact, scope }) {
       assertTaskId(task);
       if (gate.trim() === "") throw new FactoryError("invalid-contract", "gate command must be a non-empty string");
       if (artifact.trim() === "") throw new FactoryError("invalid-contract", "artifact path must be a non-empty string");
+      if (!isAbsolute(workspace)) {
+        throw new FactoryError("invalid-contract", `workspace "${workspace}" must be an absolute path`);
+      }
+      let isDirectory = false;
+      try {
+        isDirectory = statSync(workspace).isDirectory();
+      } catch {
+        // stays false — the message below is the answer either way
+      }
+      if (!isDirectory) {
+        throw new FactoryError("invalid-contract", `workspace "${workspace}" must be an existing directory`);
+      }
       let base: string | undefined;
       if (scope !== undefined && scope.length > 0) {
         const unusable =
@@ -102,6 +133,7 @@ export function createFactory(options: FactoryOptions): Factory {
       return ledger.append({
         event: "contract_set",
         task,
+        workspace,
         gate,
         artifact,
         ...(base === undefined ? {} : { scope: scope as string[], base }),
@@ -110,19 +142,32 @@ export function createFactory(options: FactoryOptions): Factory {
 
     async claim({ task, sha }) {
       assertTaskId(task);
-      const contract = ledger.eventsFor(task).findLast((e) => e.event === "contract_set");
+      const history = ledger.eventsFor(task);
+      const contract = history.findLast((e): e is ContractSet => e.event === "contract_set");
       if (!contract) throw new FactoryError("unknown-task", `no contract set for task ${task} — register one first`);
 
-      ledger.append({ event: "claim_reported", task, sha });
-      ledger.append({ event: "gate_started", task, cmd: contract.gate });
+      // ADR 0003: Attempts never overlap. The previous one must have reached
+      // its report before a new Claim opens the next Attempt.
+      const lastAttempt = maxAttempt(history);
+      if (lastAttempt > 0 && attemptIsOpen(history, lastAttempt)) {
+        throw new FactoryError(
+          "gate-running",
+          `attempt ${lastAttempt} of task ${task} is still open — wait for its verdict before claiming again`,
+        );
+      }
+      const attempt = lastAttempt + 1;
+
+      ledger.append({ event: "claim_reported", task, attempt, sha });
+      ledger.append({ event: "gate_started", task, attempt, cmd: contract.gate });
 
       // Station 1 — the claimed commit must exist as one full object. An empty,
       // unknown or ambiguous sha is a red Verdict (ADR 0002), and the gate
       // command never runs on an unverified tree.
-      const resolved = await resolveClaimedCommit(workspace, sha);
+      const resolved = await resolveClaimedCommit(contract.workspace, sha);
       if (!resolved.ok) {
         return finish(
           task,
+          attempt,
           ledger,
           stateDir,
           { exit: null, verdict: "red", note: resolved.reason, timedOut: false },
@@ -131,10 +176,11 @@ export function createFactory(options: FactoryOptions): Factory {
       }
 
       // Station 2 — clean tree, HEAD at the claimed commit, before the gate.
-      const before = await checkCleanAt(workspace, resolved.full);
+      const before = await checkCleanAt(contract.workspace, resolved.full);
       if (!before.ok) {
         return finish(
           task,
+          attempt,
           ledger,
           stateDir,
           {
@@ -151,7 +197,7 @@ export function createFactory(options: FactoryOptions): Factory {
       try {
         result = await runGate({
           cmd: contract.gate,
-          cwd: workspace,
+          cwd: contract.workspace,
           artifact: contract.artifact,
           timeoutMs: options.timeoutMs,
         });
@@ -168,10 +214,11 @@ export function createFactory(options: FactoryOptions): Factory {
 
       // Station 3 — same check after the gate: a green exit on a tree that moved
       // during the run attests nothing.
-      const after = await checkCleanAt(workspace, resolved.full);
+      const after = await checkCleanAt(contract.workspace, resolved.full);
       if (!after.ok) {
         return finish(
           task,
+          attempt,
           ledger,
           stateDir,
           {
@@ -191,16 +238,18 @@ export function createFactory(options: FactoryOptions): Factory {
         if (contract.base === undefined) {
           return finish(
             task,
+            attempt,
             ledger,
             stateDir,
             { exit: result.exit, verdict: "red", note: "scoped contract has no recorded base commit", timedOut: false },
             resolved.full,
           );
         }
-        const scopeCheck = await changesOutsideScope(workspace, contract.base, resolved.full, contract.scope);
+        const scopeCheck = await changesOutsideScope(contract.workspace, contract.base, resolved.full, contract.scope);
         if (!scopeCheck.ok) {
           return finish(
             task,
+            attempt,
             ledger,
             stateDir,
             {
@@ -217,13 +266,44 @@ export function createFactory(options: FactoryOptions): Factory {
         }
       }
 
-      return finish(task, ledger, stateDir, result, resolved.full);
+      return finish(task, attempt, ledger, stateDir, result, resolved.full);
+    },
+
+    accept({ task, attempt }) {
+      assertTaskId(task);
+      if (!Number.isInteger(attempt) || attempt < 1) {
+        throw new FactoryError("invalid-attempt", `attempt must be a positive integer, got ${attempt}`);
+      }
+      const history = ledger.eventsFor(task);
+      if (!history.some((e) => e.event === "contract_set")) {
+        throw new FactoryError("unknown-task", `no contract set for task ${task} — register one first`);
+      }
+      const attemptEvents = history.filter((e) => e.event !== "contract_set" && e.attempt === attempt);
+      if (attemptEvents.length === 0) {
+        throw new FactoryError("unknown-attempt", `task ${task} has no attempt ${attempt}`);
+      }
+      const priorAccept = history.findLast((e): e is AttemptAccepted => e.event === "attempt_accepted");
+      if (priorAccept) {
+        throw new FactoryError(
+          "already-accepted",
+          `task ${task} was already accepted at attempt ${priorAccept.attempt}; the ledger is append-only`,
+        );
+      }
+      const gate = attemptEvents.findLast((e): e is GateFinished => e.event === "gate_finished");
+      if (!gate || gate.verdict !== "green") {
+        throw new FactoryError(
+          "not-green",
+          `attempt ${attempt} of task ${task} has no green verdict — the Owner accepts evidence, and there is none`,
+        );
+      }
+      return ledger.append({ event: "attempt_accepted", task, attempt });
     },
   };
 }
 
 function finish(
   task: string,
+  attempt: number,
   ledger: Ledger,
   stateDir: string,
   result: GateResult,
@@ -232,18 +312,73 @@ function finish(
   const gate = ledger.append({
     event: "gate_finished",
     task,
+    attempt,
     exit: result.exit,
     verdict: result.verdict,
     note: result.note,
     ...(sha === undefined ? {} : { sha }),
   });
 
-  const markdown = renderReport(task, ledger.eventsFor(task));
-  const reportPath = join(stateDir, `report-${task}.md`);
+  const markdown = renderReport(task, attempt, ledger.events);
+  const reportPath = join(stateDir, `report-${task}-${attempt}.md`);
   writeFileSync(reportPath, markdown);
-  ledger.append({ event: "report_written", task, path: reportPath });
+  ledger.append({ event: "report_written", task, attempt, path: reportPath });
 
-  return { verdict: result.verdict, gate, reportPath };
+  return { attempt, verdict: result.verdict, gate, reportPath };
+}
+
+/** The highest Attempt number a task's history mentions, or 0 when none opened yet. */
+function maxAttempt(history: readonly LedgerEvent[]): number {
+  let max = 0;
+  for (const evt of history) {
+    if (evt.event !== "contract_set" && evt.attempt > max) max = evt.attempt;
+  }
+  return max;
+}
+
+/**
+ * An Attempt is open while its report is not written — after gate_finished the
+ * report lands in the same synchronous turn, so in practice this means "the
+ * gate is running" (the only await between gate_started and report_written).
+ */
+function attemptIsOpen(history: readonly LedgerEvent[], attempt: number): boolean {
+  const attemptEvents = history.filter((e) => e.event !== "contract_set" && e.attempt === attempt);
+  return attemptEvents.length > 0 && !attemptEvents.some((e) => e.event === "report_written");
+}
+
+/**
+ * ADR 0003 recovery, run once when the factory opens its ledger: any Attempt
+ * that never reached its report is closed red and reported, because no green
+ * was ever established — red is the fact, not a guess. This is what a plugin
+ * restart mid-gate looks like in the ledger when the smoke clears.
+ */
+function recoverInterruptedAttempts(ledger: Ledger, stateDir: string): { task: string; attempt: number }[] {
+  const recovered: { task: string; attempt: number }[] = [];
+  const tasks = [...new Set(ledger.events.map((e) => e.task))];
+  for (const task of tasks) {
+    const history = ledger.eventsFor(task);
+    for (let attempt = 1; attempt <= maxAttempt(history); attempt++) {
+      if (!attemptIsOpen(history, attempt)) continue;
+      const attemptEvents = history.filter((e) => e.event !== "contract_set" && e.attempt === attempt);
+      const gateStarted = attemptEvents.some((e) => e.event === "gate_started");
+      ledger.append({
+        event: "gate_finished",
+        task,
+        attempt,
+        exit: null,
+        verdict: "red",
+        note: gateStarted
+          ? "interrupted — the factory restarted before the Gate finished"
+          : "interrupted — the factory restarted before the Gate started",
+      });
+      const markdown = renderReport(task, attempt, ledger.events);
+      const reportPath = join(stateDir, `report-${task}-${attempt}.md`);
+      writeFileSync(reportPath, markdown);
+      ledger.append({ event: "report_written", task, attempt, path: reportPath });
+      recovered.push({ task, attempt });
+    }
+  }
+  return recovered;
 }
 
 function assertTaskId(task: string): void {
