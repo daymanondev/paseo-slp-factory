@@ -13,8 +13,8 @@ The coding agent doing the work on a Task. It may make Claims; it never sets or 
 _Avoid_: worker, peer (in this context), bot
 
 **Owner**:
-Whoever sets a Task's Contract — the human, or a Lead acting for them. Never the Agent working that Task.
-_Avoid_: supervisor, reviewer, user
+Whoever sets a Task's Contract — the human, or an agent the human has explicitly delegated the Owner seat to (revocably). Never the Agent working that Task.
+_Avoid_: supervisor, reviewer, user, Lead (that is a seatworks role, not a factory one)
 
 ### Work and criteria
 
@@ -57,8 +57,12 @@ The state of a Task after the Owner accepts one of its Attempts. Only an Attempt
 _Avoid_: done, finished, complete, passed
 
 **Fresh-eyes review**:
-A planned second judgment of an Attempt by a model that took no part in writing it. Not part of v0.0.1.
+A planned second judgment of an Attempt by a model that took no part in writing it. Off unless the Contract marks it on. Not part of v0.0.1.
 _Avoid_: mắt soi (outside research notes), code review, self-review
+
+**Retro**:
+A scheduled fresh-context pass that reads the Ledger, Reports and gate notes and emits proposals — new Gate checks for repeated failures, draft Contracts for knowledge gaps. It never applies its own proposals.
+_Avoid_: retrospective (the agile ceremony), postmortem
 
 ### Records
 
@@ -69,3 +73,9 @@ _Avoid_: log, history, sổ (outside research notes)
 **Report**:
 The human-readable account of one Attempt, generated from the Ledger, with every line traceable to a Ledger event.
 _Avoid_: summary, biên bản (outside research notes)
+
+### Running
+
+**Unattended loop**:
+A driver loop that takes approved Contracts, spawns Agents, runs Gates and records Verdicts without the Owner present. It commits to branches only; landing to main is always a human act. Not part of v0.0.1.
+_Avoid_: autopilot, background job, cron
