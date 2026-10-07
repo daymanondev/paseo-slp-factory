@@ -33,6 +33,8 @@ export interface ContractRequest {
   gate: string;
   artifact: string;
   scope?: string[];
+  /** Marks the fresh-eyes pass ON (ADR 0005 default: off). Exactly `true` passes; anything else is rejected. */
+  freshEyes?: true;
 }
 
 export interface ClaimRequest {
@@ -86,7 +88,17 @@ export function parseSpoolRequest(body: unknown): SpoolRequest | undefined {
     }
     const scope = req.scope;
     if (scope !== undefined && (!Array.isArray(scope) || scope.some((s) => typeof s !== "string"))) return undefined;
-    return { id: req.id, kind: "contract", task: req.task, workspace: req.workspace, gate: req.gate, artifact: req.artifact, ...(scope === undefined ? {} : { scope: scope as string[] }) };
+    if (req.freshEyes !== undefined && req.freshEyes !== true) return undefined;
+    return {
+      id: req.id,
+      kind: "contract",
+      task: req.task,
+      workspace: req.workspace,
+      gate: req.gate,
+      artifact: req.artifact,
+      ...(scope === undefined ? {} : { scope: scope as string[] }),
+      ...(req.freshEyes === undefined ? {} : { freshEyes: true }),
+    };
   }
   if (req.kind === "claim") {
     if (typeof req.task !== "string" || typeof req.sha !== "string") return undefined;
@@ -114,11 +126,16 @@ export async function handleSpoolRequest(factory: Factory, request: SpoolRequest
         gate: request.gate,
         artifact: request.artifact,
         ...(request.scope === undefined ? {} : { scope: request.scope }),
+        ...(request.freshEyes === undefined ? {} : { freshEyes: true }),
       });
-      return { id: request.id, ok: true, summary: `contract set for ${request.task}: \`${request.gate}\` in ${request.workspace}` };
+      return { id: request.id, ok: true, summary: `contract set for ${request.task}: \`${request.gate}\` in ${request.workspace}${request.freshEyes === true ? " · fresh eyes ON" : ""}` };
     }
     if (request.kind === "claim") {
-      const outcome = await factory.claim({ task: request.task, sha: request.sha });
+      const outcome = await factory.claim({
+        task: request.task,
+        sha: request.sha,
+        ...(request.agent === undefined ? {} : { agent: request.agent }),
+      });
       return {
         id: request.id,
         ok: true,

@@ -1,5 +1,6 @@
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,4 +61,67 @@ export function gitCommitChanges(dir: string, message: string): string {
   run(["add", "-A"]);
   run(["commit", "-q", "-m", message]);
   return execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).trim();
+}
+
+/** One request the fake eye received — body already parsed when JSON. */
+export interface FakeEyeRequest {
+  path: string;
+  headers: IncomingMessage["headers"];
+  body: unknown;
+}
+
+export type FakeEyeResponse = { status: number; payload: unknown } | { hang: true };
+
+export interface FakeEye {
+  url: string;
+  requests: FakeEyeRequest[];
+  /** Closes the listener so the port refuses connections — a dead daemon. */
+  stop(): Promise<void>;
+}
+
+/**
+ * A local stand-in for the eye's Anthropic-messages API: hermetic, loopback
+ * only, no network. `respond` is called per request so a test can change its
+ * answer mid-pass (retry rules); `{ hang: true }` never answers, for budget
+ * tests. Every request is recorded for prompt-content assertions.
+ */
+export async function startFakeEye(t: TestContext, respond: () => FakeEyeResponse): Promise<FakeEye> {
+  const requests: FakeEyeRequest[] = [];
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      let body: unknown = raw;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        // kept raw — non-JSON bodies are a legitimate failure case
+      }
+      requests.push({ path: req.url ?? "/", headers: req.headers, body });
+      const answer = respond();
+      if ("hang" in answer) return;
+      res.statusCode = answer.status;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(answer.payload));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const stop = (): Promise<void> =>
+    new Promise<void>((resolve) => server.close(() => resolve()));
+  t.after(() => stop());
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("fake eye did not get a port");
+  return { url: `http://127.0.0.1:${address.port}`, requests, stop };
+}
+
+/** Writes the eye's config (ticket 04 shape) pointing at the fake server. */
+export function writeEyeConfig(stateDir: string, baseUrl: string, model = "fake-eye-1"): void {
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "eye.json"), `${JSON.stringify({ provider: "fake", model, apiKey: "test-key", baseUrl }, null, 2)}\n`);
+}
+
+/** The standard Anthropic-messages text answer. */
+export function eyeAnswer(text: string): unknown {
+  return { content: [{ type: "text", text }] };
 }

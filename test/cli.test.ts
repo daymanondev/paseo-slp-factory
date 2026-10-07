@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createFactory } from "../plugin/server/core/factory.ts";
 import { startSpool } from "../plugin/server/spool.ts";
-import { copyFixture, disposeDir, gitCommitAll, gitCommitChanges, makeTempDir, repoRoot } from "./helpers.ts";
+import { copyFixture, disposeDir, eyeAnswer, gitCommitAll, gitCommitChanges, makeTempDir, repoRoot, startFakeEye, writeEyeConfig } from "./helpers.ts";
 
 /**
  * The mechanical DoD of ticket 08 without a daemon: the real CLIs
@@ -151,4 +151,71 @@ test("a claim with no plugin answering times out honestly and exits 2", async (t
   assert.match(result.stderr, /no reply from the factory plugin/);
   assert.match(result.stderr, /do not resubmit/);
   assert.ok(existsSync(join(stateDir, "spool", "requests")), "the request is durably queued, not lost");
+});
+
+test("the loop with --fresh-eyes: the eye's line lands through the real CLIs and spool", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const workspace = join(dir, "workspace");
+  copyFixture("sample-workspace", workspace);
+  const brokenSha = gitCommitAll(workspace);
+  const home = join(dir, "paseo-home");
+  const stateDir = join(home, "plugin-state", "paseo-factory");
+  const fake = await startFakeEye(t, () => ({
+    status: 200,
+    payload: eyeAnswer("CLEAR\nthe fix matches the contract; nothing to add."),
+  }));
+  writeEyeConfig(stateDir, fake.url);
+
+  const factory = createFactory({ stateDir });
+  const spool = startSpool(stateDir, factory);
+  t.after(() => spool.stop());
+
+  const ownerEnv = { PASEO_HOME: home };
+  const agentEnv = { FACTORY_STATE_DIR: stateDir, PASEO_AGENT_ID: "agent-eye-1" };
+
+  // A marked contract without eye.json would fail fast; with it, the flag rides.
+  const contract = await run(ownerCli, [
+    "contract", "--task", "LOOP2", "--workspace", workspace, "--gate", "npm test", "--artifact", "src/format.ts", "--fresh-eyes",
+  ], ownerEnv);
+  assert.equal(contract.status, 0, contract.stderr);
+  assert.match(contract.stdout, /fresh eyes ON/);
+
+  // The red attempt never asks the eye.
+  const red = await run(claimCli, ["--task", "LOOP2", "--sha", brokenSha], agentEnv);
+  assert.equal(red.status, 1);
+  assert.equal(fake.requests.length, 0, "red verdicts never call the eye");
+
+  // The real fix: green, and the eye reads contract + diff + gate output.
+  writeFileSync(
+    join(workspace, "src", "format.ts"),
+    [
+      "export function pad(input: string, width: number): string {",
+      "  if (input.length >= width) return input.slice(0, width);",
+      "  return input + \" \".repeat(width - input.length);",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  const fixedSha = gitCommitChanges(workspace, "fix pad to truncate and pad correctly");
+  const green = await run(claimCli, ["--task", "LOOP2", "--sha", fixedSha], agentEnv);
+  assert.equal(green.status, 0, `expected green\nstdout: ${green.stdout}\nstderr: ${green.stderr}`);
+
+  assert.equal(fake.requests.length, 1, "one green attempt, one eye pass");
+  const prompt = (fake.requests[0]!.body as { messages: { content: string }[] }).messages[0]!.content;
+  assert.ok(prompt.includes("Task: LOOP2"));
+  assert.ok(prompt.includes("src/format.ts"), "the diff is in the bundle");
+
+  const events = factory.ledger.eventsFor("LOOP2").map((e) => e.event);
+  assert.deepEqual(events, [
+    "contract_set",
+    "claim_reported", "gate_started", "gate_finished", "report_written",
+    "claim_reported", "gate_started", "gate_finished", "fresh_eyes_written", "report_written",
+  ]);
+  const claim = factory.ledger.eventsFor("LOOP2").filter((e) => e.event === "claim_reported").at(-1);
+  assert.equal((claim as { agent?: string }).agent, "agent-eye-1", "the spool stamps the submitter (ticket 02b)");
+  const report = readFileSync(join(stateDir, "report-LOOP2-2.md"), "utf8");
+  assert.ok(report.includes("- Claimed by agent `agent-eye-1`"));
+  assert.ok(report.includes("- Fresh eyes (`fake-eye-1`) — CLEAR: the fix matches the contract; nothing to add."));
+  assert.ok(existsSync(join(stateDir, "gate-LOOP2-2.log")), "the full gate output is persisted (ticket 02a)");
 });

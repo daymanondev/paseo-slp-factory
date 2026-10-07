@@ -7,7 +7,9 @@
  * / ADR 0002 — the Owner chooses where the Gate runs, never the Agent), and
  * `claim_reported` replaces §2's `done_reported` (ADR 0003: the Agent makes a
  * Claim, never "done"). `attempt_accepted` is ADR 0002: only the Owner accepts,
- * and acceptance names one green Attempt.
+ * and acceptance names one green Attempt. `fresh_eyes_written` is v0.0.2
+ * (ticket 03): one advisory line between a green `gate_finished` and its
+ * `report_written` — evidence for the Owner, never a second Verdict.
  */
 
 export type Verdict = "red" | "green";
@@ -18,6 +20,7 @@ export const EVENT_NAMES = [
   "claim_reported",
   "gate_started",
   "gate_finished",
+  "fresh_eyes_written",
   "report_written",
   "attempt_accepted",
 ] as const;
@@ -38,8 +41,14 @@ export interface ContractSet {
   artifact: string;
   /** Path prefixes (workspace-relative) the task may touch. Omitted = unrestricted. */
   scope?: string[];
-  /** The commit the Workspace sat at when the Contract was set — the diff base for the scope check. */
+  /**
+   * The commit the Workspace sat at when the Contract was set — the diff base
+   * for the scope check and the fresh-eyes pass. Recorded on every Contract
+   * since v0.0.2 (ticket 03 R2); pre-0.0.2 Contracts predate it.
+   */
   base?: string;
+  /** Marks the fresh-eyes pass ON for this task (ADR 0005 default: off). */
+  freshEyes?: true;
 }
 
 export interface ClaimReported {
@@ -51,6 +60,11 @@ export interface ClaimReported {
   attempt: number;
   /** The Agent's raw claimed sha — its exact word, resolved later by the gate station. */
   sha: string;
+  /**
+   * Who claimed, when the plugin knows the submitter (spool claims stamped
+   * with the agent id; direct CLI claims carry no spool, so no agent).
+   */
+  agent?: string;
 }
 
 export interface GateStarted {
@@ -74,6 +88,32 @@ export interface GateFinished {
   note: string;
   /** The full commit the Verdict attests — present whenever the claimed sha resolved (ADR 0002). */
   sha?: string;
+  /**
+   * The persisted full gate output (`gate-<task>-<attempt>.log` in stateDir),
+   * present whenever the gate ran — the ledger alone can find the evidence
+   * (ticket 02a). The `note` stays a one-line summary.
+   */
+  outputPath?: string;
+}
+
+/**
+ * The fresh-eyes line (ticket 03): one read-only pass by a different model
+ * after a green Verdict. `outcome` is the countable noise instrument; on
+ * `failed`, `finding` carries the error — deaths are visible, never swallowed.
+ */
+export interface FreshEyesWritten {
+  seq: number;
+  ts: Timestamp;
+  event: "fresh_eyes_written";
+  task: string;
+  attempt: number;
+  /** The model id actually used, from the plugin's eye config (ticket 04). */
+  model: string;
+  outcome: "concern" | "clear" | "failed";
+  /** The eye's words, ≤ ~120 words — "what did the eye see". */
+  finding: string;
+  /** Pass latency, for the 0.0.2 live run's cost/noise questions. */
+  durationMs: number;
 }
 
 export interface ReportWritten {
@@ -98,6 +138,7 @@ export type LedgerEvent =
   | ClaimReported
   | GateStarted
   | GateFinished
+  | FreshEyesWritten
   | ReportWritten
   | AttemptAccepted;
 
@@ -107,5 +148,6 @@ export type PendingEvent =
   | Omit<ClaimReported, "seq" | "ts">
   | Omit<GateStarted, "seq" | "ts">
   | Omit<GateFinished, "seq" | "ts">
+  | Omit<FreshEyesWritten, "seq" | "ts">
   | Omit<ReportWritten, "seq" | "ts">
   | Omit<AttemptAccepted, "seq" | "ts">;

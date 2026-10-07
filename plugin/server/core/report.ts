@@ -1,19 +1,22 @@
 import { FactoryError } from "./errors.ts";
-import type { ClaimReported, ContractSet, GateFinished, LedgerEvent } from "./events.ts";
+import type { ClaimReported, ContractSet, FreshEyesWritten, GateFinished, LedgerEvent } from "./events.ts";
 
 /**
  * Renders `report-<task>-<n>.md` from ledger events — every content line traces
  * to one: contract line ← contract_set, claim ← claim_reported, attested commit ←
- * gate_finished.sha, verdict ← the gate verdict. Timestamps come from events,
- * not render time (ADR 0003); the header carries the moment the Verdict was
- * established. The report states evidence and stops there: green is not
- * acceptance (ADR 0002), so no line concludes "DONE".
+ * gate_finished.sha, verdict ← the gate verdict, the eye's line ←
+ * fresh_eyes_written. Timestamps come from events, not render time (ADR 0003);
+ * the header carries the moment the Verdict was established. The report states
+ * evidence and stops there: green is not acceptance (ADR 0002), so no line
+ * concludes "DONE" — and the eye's line, when present, sits between the
+ * Verdict and the closing language as evidence, never as a second verdict.
  */
 export function renderReport(task: string, attempt: number, events: readonly LedgerEvent[]): string {
   const mine = events.filter((e) => e.task === task && (e.event === "contract_set" || ("attempt" in e && e.attempt === attempt)));
   const contract = mine.findLast((e): e is ContractSet => e.event === "contract_set");
   const claim = mine.findLast((e): e is ClaimReported => e.event === "claim_reported");
   const gate = mine.findLast((e): e is GateFinished => e.event === "gate_finished");
+  const eye = mine.findLast((e): e is FreshEyesWritten => e.event === "fresh_eyes_written");
 
   if (!contract || !claim || !gate) {
     const missing = [
@@ -40,13 +43,23 @@ export function renderReport(task: string, attempt: number, events: readonly Led
     }`,
     `- Workspace: ${contract.workspace}`,
     `- Claimed @ ${formatTimestamp(claim.ts)}: ${claim.sha}`,
+    ...(claim.agent === undefined ? [] : [`- Claimed by agent \`${claim.agent}\``]),
     ...(gate.sha === undefined ? [] : [`- Attested commit: \`${gate.sha}\``]),
     `- Verdict: ${gate.verdict.toUpperCase()} — ${gate.note}`,
+    ...(eyeLine(eye)),
     gate.verdict === "green"
       ? "- Evidence, not acceptance: gate exited 0 at the attested commit, artifact present. Only the Owner accepts an Attempt."
       : "- Contract not met — send the gate note back to the agent, with the reminder: do not make the tests green yourself.",
   ];
   return `${lines.join("\n")}\n`;
+}
+
+/** The eye's one line — evidence for the Owner; a `failed` pass names its error where the Owner reads. */
+function eyeLine(eye: FreshEyesWritten | undefined): string[] {
+  if (eye === undefined) return [];
+  const verdict = eye.outcome === "concern" ? "CONCERN" : eye.outcome === "clear" ? "CLEAR" : "FAILED";
+  const suffix = eye.finding === "" ? "" : `: ${eye.finding}`;
+  return [`- Fresh eyes (\`${eye.model}\`) — ${verdict}${suffix}`];
 }
 
 function formatTimestamp(iso: string): string {

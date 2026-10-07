@@ -57,7 +57,7 @@ The state of a Task after the Owner accepts one of its Attempts. Only an Attempt
 _Avoid_: done, finished, complete, passed
 
 **Fresh-eyes review**:
-A planned second judgment of an Attempt by a model that took no part in writing it. Off unless the Contract marks it on. Not part of v0.0.1.
+A second judgment of a green Attempt by a different model that took no part in writing it — one direct-API read of the Contract, the diff and the gate output, appending one advisory ledger line (`fresh_eyes_written`). Evidence for the Owner, never acceptance; off unless the Contract marks it on. Added in v0.0.2.
 _Avoid_: mắt soi (outside research notes), code review, self-review
 
 **Retro**:

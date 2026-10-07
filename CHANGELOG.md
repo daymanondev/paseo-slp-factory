@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] — fresh-eyes station (unreleased; PR open)
+
+v0.0.2's one thing: after a green Verdict, a different model — called by direct
+API from the plugin, no harness (ADR 0005) — reads the Contract, the diff and
+the full gate output, and appends one advisory line to the ledger. Evidence for
+the Owner, never a second Verdict. Default off; the Contract marks it on.
+
+### Added
+
+- Fresh-eyes review pass (tickets 02–04):
+  - `freshEyes: true` on a Contract marks the pass ON (`factory contract
+    --fresh-eyes`); an unmarked Contract behaves exactly like v0.0.1.
+  - Green verdicts only, synchronous inside the attempt's closing window:
+    `gate_finished` → `fresh_eyes_written` → `report_written`, so the report is
+    written once, already containing the eye's line. The pass never touches the
+    Verdict or `accept` — advisory by construction.
+  - New event `fresh_eyes_written {task, attempt, model, outcome, finding,
+    durationMs}`; `outcome` is `concern | clear | failed` (the countable noise
+    instrument), `finding` is the eye's ≤ ~120 words, and on `failed` it carries
+    the error — deaths are visible, never swallowed.
+  - Input bundle: the Contract, the diff `base..claimed` (tail 100K chars), the
+    full gate output (tail 50K chars); every truncation leaves a `[truncated]`
+    marker and the prompt forbids guessing about cut content. The prompt lives
+    in one module (`src/fresh-eyes.ts`), is English, and enforces a hard output
+    contract: first line `CONCERN` or `CLEAR`, findings cite `file:line`, and
+    the eye proposes patches as text only — it never runs anything.
+  - The eye's config is `<stateDir>/eye.json` (mode 600, shape
+    `{provider, model, apiKey, baseUrl}`, copied not referenced), read per pass
+    so key/model rotation needs no restart. The key never appears in a
+    Contract, ledger line, or report.
+  - Failure semantics: 60s total budget over both tries (one `AbortController`),
+    at most one retry and only on transient failures (network error, 429, 5xx) —
+    never on 400/401/403. Every failure lands as a visible `failed` line in the
+    ledger and the report. `contract --fresh-eyes` fails fast (`eye-unconfigured`)
+    when `eye.json` is missing or unusable, before any agent work starts.
+  - The API call is one plain `fetch` (zero runtime deps law): an
+    Anthropic-messages `POST {baseUrl}/v1/messages` with `x-api-key`.
+
+### Changed
+
+- Full gate output is persisted (ticket 02a): the capture ceiling rises 4 KB →
+  2 MB raw (combined stdout+stderr, interleaved as it arrived), lands beside the
+  report as `gate-<task>-<attempt>.log`, and `gate_finished` gains an additive
+  `outputPath` pointing at it — the ledger alone can find the evidence. The
+  `note` keeps its 200-char one-line summary role, now cut at a word boundary
+  with a leading ellipsis when truncated (ticket 02c) — a note never begins
+  mid-word.
+- `claim_reported` gains an optional `agent` field (ticket 02b) — the spool
+  submitter id, stamped by the plugin when the CLI carries `PASEO_AGENT_ID`;
+  direct CLI claims stay anonymous. The report renders `Claimed by agent
+  \`<id>\``. `factory status` is untouched (task view, not person view).
+- `contract_set` records `base` (HEAD at set time) on every Contract (ticket 03
+  R2) — it is the diff range for the scope check and the fresh-eyes pass, so a
+  workspace without a resolvable HEAD is now refused at contract time, scoped
+  or not. Pre-0.0.2 Contracts simply predate the eye; no backfill.
+- Recovery generalized (ticket 03 R1): an Attempt that already has its
+  `gate_finished` (a restart during the eye's window is the one place that
+  happens) gets only its missing report written on reopen — never a second,
+  red `gate_finished` over a verdict that already landed.
+
 ## [0.0.1] - 2026-10-07
 
 First runnable loop, proven live end-to-end on a trial Paseo 0.10 daemon.
