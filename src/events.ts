@@ -1,7 +1,9 @@
 /**
  * Ledger event shapes — the v0.0.1 contract with the roadmap doc
  * (`research/03-hands-on/05-lo-trinh-paseo-factory.md` §2). Field names and
- * shapes are fixed there; the five events are the whole vocabulary.
+ * shapes are fixed there; the five events are the whole vocabulary. The one
+ * rename since — `claim_reported` — is ADR 0003, which supersedes §2's
+ * `done_reported`: the Agent makes a Claim, never "done".
  */
 
 export type Verdict = "red" | "green";
@@ -9,7 +11,7 @@ export type Verdict = "red" | "green";
 /** The whole event vocabulary, in ledger order — single source for types and validation. */
 export const EVENT_NAMES = [
   "contract_set",
-  "done_reported",
+  "claim_reported",
   "gate_started",
   "gate_finished",
   "report_written",
@@ -25,10 +27,11 @@ export interface ContractSet {
   artifact: string;
 }
 
-export interface DoneReported {
+export interface ClaimReported {
   seq: number;
-  event: "done_reported";
+  event: "claim_reported";
   task: string;
+  /** The Agent's raw claimed sha — its exact word, resolved later by the gate station. */
   sha: string;
 }
 
@@ -43,10 +46,12 @@ export interface GateFinished {
   seq: number;
   event: "gate_finished";
   task: string;
-  /** Process exit code, or null when the gate was killed (timeout / signal). */
+  /** Process exit code, or null when the gate was killed (timeout / signal) or never ran. */
   exit: number | null;
   verdict: Verdict;
   note: string;
+  /** The full commit the Verdict attests — present whenever the claimed sha resolved (ADR 0002). */
+  sha?: string;
 }
 
 export interface ReportWritten {
@@ -56,12 +61,12 @@ export interface ReportWritten {
   path: string;
 }
 
-export type LedgerEvent = ContractSet | DoneReported | GateStarted | GateFinished | ReportWritten;
+export type LedgerEvent = ContractSet | ClaimReported | GateStarted | GateFinished | ReportWritten;
 
 /** What callers hand to Ledger.append — same shape, seq not yet assigned. */
 export type PendingEvent =
   | Omit<ContractSet, "seq">
-  | Omit<DoneReported, "seq">
+  | Omit<ClaimReported, "seq">
   | Omit<GateStarted, "seq">
   | Omit<GateFinished, "seq">
   | Omit<ReportWritten, "seq">;
