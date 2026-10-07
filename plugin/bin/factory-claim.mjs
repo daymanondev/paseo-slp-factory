@@ -11,8 +11,8 @@ import { parseArgs } from "node:util";
 
 const usage = `usage: factory-claim --task <id> --sha <commit-sha>
 
-Report that the task is finished at a specific commit. The factory does not
-trust this statement: it runs the contract's gate at the claimed commit and
+Claim that the task is finished at a specific commit. The factory does not
+trust the claim: it runs the contract's gate at the claimed commit and
 records the verdict (paseo-factory v0.0.1).`;
 
 let args;

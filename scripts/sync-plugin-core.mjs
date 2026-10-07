@@ -11,8 +11,9 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const repoRoot = new URL("..", import.meta.url).pathname;
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const srcDir = join(repoRoot, "src");
 const coreDir = join(repoRoot, "plugin", "server", "core");
 const check = process.argv.includes("--check");

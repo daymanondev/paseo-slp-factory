@@ -43,16 +43,16 @@ export function stateDirFor(paseoHome: string): string {
  * The plugin's own source directory, as recorded by `paseo plugin install`
  * (`config.json → plugins["paseo-factory"] = {source: "directory", path}`).
  * `undefined` when the config is unreadable or the entry is not a local
- * directory install — callers must degrade visibly, not crash.
+ * directory install — callers must degrade visibly, never crash.
  */
-export function pluginDirFor(paseoHome: string, pluginId: string = PLUGIN_ID): string | undefined {
+export function pluginDirFor(paseoHome: string): string | undefined {
   let config: unknown;
   try {
     config = JSON.parse(readFileSync(join(paseoHome, "config.json"), "utf8"));
   } catch {
     return undefined;
   }
-  const entry = (config as { plugins?: Record<string, unknown> })?.plugins?.[pluginId];
+  const entry = (config as { plugins?: Record<string, unknown> })?.plugins?.[PLUGIN_ID];
   if (
     typeof entry === "object" &&
     entry !== null &&

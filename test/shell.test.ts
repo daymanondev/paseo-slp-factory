@@ -79,7 +79,7 @@ test("ensureClaimCli writes an executable wrapper around the daemon's node", (t)
   const pluginDir = join(stateDir, "plugin-source");
   mkdirSync(join(pluginDir, "bin"), { recursive: true });
 
-  assert.equal(ensureClaimCli(stateDir, pluginDir, "/daemon/node"), true);
+  ensureClaimCli(stateDir, pluginDir, "/daemon/node");
 
   const wrapper = join(claimCliBinDir(stateDir), "factory-claim");
   assert.ok(existsSync(wrapper), "wrapper exists at <stateDir>/bin/factory-claim");

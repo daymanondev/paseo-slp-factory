@@ -12,7 +12,11 @@
   `stateDir/spool/requests/` and wait for the reply. Each request carries an id, so a
   retried call never starts a second Gate.
 - **The Agent gets the Claim as a CLI on its `PATH`**, put there by the plugin's
-  `agent.create` before-hook — not as an MCP tool. It accepts only `--task` and `--sha`.
+  `agent.session_open` before-hook — not as an MCP tool. It accepts only `--task` and
+  `--sha`. *(Amended 2026-10-07, ticket 06: the original wording said `agent.create`;
+  that hook's `env` is not re-applied on resume, while `agent.session_open` fires for
+  create, resume, refresh and import — daemon `agent-manager.js` `buildLaunchContext` —
+  so it is the single injection point.)*
 - **All state lives in `stateDir`, outside the Workspace**: Ledger, spool, Reports.
   Reports inside the Workspace would dirty the tree the next Attempt must find clean, and
   the Agent could edit them.

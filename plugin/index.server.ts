@@ -23,8 +23,8 @@ export default function contribute(server: PluginServerContext) {
   const pluginDir = pluginDirFor(home);
 
   // Opening validates any existing ledger and fails the plugin on corruption
-  // — fail closed, loudly, never silently degrade (core decision, law #5).
-  // Ticket 08 turns this into the long-lived factory instance.
+  // — fail closed, loudly, never silently degrade (no component dies
+  // silently). Ticket 08 turns this into the long-lived factory instance.
   Ledger.open(join(stateDir, "ledger.jsonl"));
 
   if (pluginDir === undefined) {
