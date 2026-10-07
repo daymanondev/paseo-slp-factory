@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `factory status` — the Owner's read-only glance at the ledger: one line per
+  task (attempts, last verdict, attested sha (short), accepted) read directly
+  from `ledger.jsonl`, no spool round trip and no running plugin. An
+  unreadable ledger is refused (exit 2) rather than guessed around.
 - The wired loop (ticket 08, ADR 0004): the plugin process is the single
   Ledger writer and Gate runner, and the CLIs only submit through
   `stateDir/spool/` (`requests/` → `replies/` → `processed/`, atomic writes,
