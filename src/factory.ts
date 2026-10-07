@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { Ledger } from "./ledger.ts";
 import { runGate } from "./gate.ts";
 import { renderReport } from "./report.ts";
-import { checkCleanAt, resolveClaimedCommit } from "./workspace.ts";
+import { changesOutsideScope, checkCleanAt, headCommitSync, resolveClaimedCommit } from "./workspace.ts";
 import { FactoryError } from "./errors.ts";
 import type { ContractSet, GateFinished, Verdict } from "./events.ts";
 import type { GateResult } from "./gate.ts";
@@ -24,6 +24,12 @@ export interface ContractInput {
   task: string;
   gate: string;
   artifact: string;
+  /**
+   * Path prefixes (workspace-relative) the task may touch — the mechanical
+   * task boundary (ticket 14). Omitted or empty = unrestricted, v0.0.1
+   * behavior. A diff outside the scope is a red Verdict naming the files.
+   */
+  scope?: string[];
 }
 
 export interface ClaimInput {
@@ -63,10 +69,29 @@ export function createFactory(options: FactoryOptions): Factory {
     stateDir,
     workspace,
 
-    setContract({ task, gate, artifact }) {
+    setContract({ task, gate, artifact, scope }) {
       assertTaskId(task);
       if (gate.trim() === "") throw new FactoryError("invalid-contract", "gate command must be a non-empty string");
       if (artifact.trim() === "") throw new FactoryError("invalid-contract", "artifact path must be a non-empty string");
+      let base: string | undefined;
+      if (scope !== undefined && scope.length > 0) {
+        const unusable =
+          !Array.isArray(scope) ||
+          scope.some(
+            (prefix) =>
+              typeof prefix !== "string" ||
+              prefix.trim() === "" ||
+              prefix.startsWith("/") ||
+              prefix.split("/").includes(".."),
+          );
+        if (unusable) {
+          throw new FactoryError("invalid-contract", "scope must be an array of workspace-relative path prefixes");
+        }
+        base = headCommitSync(workspace);
+        if (base === undefined) {
+          throw new FactoryError("invalid-contract", "a scoped contract requires a git workspace with a resolvable HEAD");
+        }
+      }
       const existing = ledger.eventsFor(task).some((e) => e.event === "contract_set");
       if (existing) {
         throw new FactoryError(
@@ -74,7 +99,13 @@ export function createFactory(options: FactoryOptions): Factory {
           `contract already set for task ${task}; the ledger is append-only — use a new task id`,
         );
       }
-      return ledger.append({ event: "contract_set", task, gate, artifact });
+      return ledger.append({
+        event: "contract_set",
+        task,
+        gate,
+        artifact,
+        ...(base === undefined ? {} : { scope: scope as string[], base }),
+      });
     },
 
     async claim({ task, sha }) {
@@ -151,6 +182,39 @@ export function createFactory(options: FactoryOptions): Factory {
           },
           resolved.full,
         );
+      }
+
+      // Station 4 — the mechanical task boundary (ticket 14): every file the
+      // diff touches must fall inside a declared scope prefix. A task that
+      // overreaches is refused here, never prompted back to polite behavior.
+      if (contract.scope !== undefined && contract.scope.length > 0) {
+        if (contract.base === undefined) {
+          return finish(
+            task,
+            ledger,
+            stateDir,
+            { exit: result.exit, verdict: "red", note: "scoped contract has no recorded base commit", timedOut: false },
+            resolved.full,
+          );
+        }
+        const scopeCheck = await changesOutsideScope(workspace, contract.base, resolved.full, contract.scope);
+        if (!scopeCheck.ok) {
+          return finish(
+            task,
+            ledger,
+            stateDir,
+            {
+              exit: result.exit,
+              verdict: "red",
+              note:
+                scopeCheck.reason !== undefined
+                  ? `scope check failed: ${scopeCheck.reason}`
+                  : `changes outside declared scope: ${scopeCheck.files.join(", ")}`,
+              timedOut: false,
+            },
+            resolved.full,
+          );
+        }
       }
 
       return finish(task, ledger, stateDir, result, resolved.full);

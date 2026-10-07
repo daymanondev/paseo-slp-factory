@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createFactory } from "../src/factory.ts";
 import { FactoryError } from "../src/errors.ts";
-import { disposeDir, factoryErrorCode, gitCommitAll, makeTempDir } from "./helpers.ts";
+import { disposeDir, factoryErrorCode, gitCommitAll, gitCommitChanges, makeTempDir } from "./helpers.ts";
 
 function makeWorkspace(dir: string): { workspace: string; artifact: string; sha: string } {
   const workspace = join(dir, "ws");
@@ -217,6 +217,87 @@ test("a workspace that is not a git repo is red, not a crash", async (t) => {
 
   assert.equal(outcome.verdict, "red");
   assert.match(outcome.gate.note, /cannot be resolved/);
+});
+
+test("scoped contract: an in-scope-only diff behaves exactly as today", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const { workspace, artifact } = makeWorkspace(dir);
+  const stateDir = join(dir, "factory");
+  const factory = createFactory({ stateDir, workspace });
+
+  factory.setContract({ task: "SC1", gate: "true", artifact, scope: ["src"] });
+  writeFileSync(join(workspace, "src", "extra.ts"), "export const extra = 1;\n");
+  const sha2 = gitCommitChanges(workspace, "add extra module in scope");
+  const outcome = await factory.claim({ task: "SC1", sha: sha2 });
+
+  assert.equal(outcome.verdict, "green");
+  assert.equal(outcome.gate.sha, sha2);
+  const report = readFileSync(outcome.reportPath, "utf8");
+  assert.ok(report.includes("scope: `src`"), "the report shows the declared boundary");
+});
+
+test("scoped contract: one file outside scope is red with that file named", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const { workspace, artifact } = makeWorkspace(dir);
+  const factory = createFactory({ stateDir: join(dir, "factory"), workspace });
+
+  factory.setContract({ task: "SC2", gate: "true", artifact, scope: ["src"] });
+  writeFileSync(join(workspace, "src", "extra.ts"), "export const extra = 1;\n");
+  writeFileSync(join(workspace, "README.md"), "# touched out of scope\n");
+  const sha2 = gitCommitChanges(workspace, "add extra module and touch README");
+  const outcome = await factory.claim({ task: "SC2", sha: sha2 });
+
+  assert.equal(outcome.verdict, "red");
+  assert.equal(outcome.gate.exit, 0, "the gate passed — the overreach is what is red");
+  assert.ok(outcome.gate.note.includes("changes outside declared scope"), outcome.gate.note);
+  assert.ok(outcome.gate.note.includes("README.md"), "the offending file is named");
+  assert.ok(!outcome.gate.note.includes("extra.ts"), "in-scope files are not named");
+});
+
+test("omitted scope keeps the unrestricted v0.0.1 behavior", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const { workspace, artifact } = makeWorkspace(dir);
+  const factory = createFactory({ stateDir: join(dir, "factory"), workspace });
+
+  factory.setContract({ task: "SC3", gate: "true", artifact });
+  writeFileSync(join(workspace, "README.md"), "# anywhere is fine without a scope\n");
+  const sha2 = gitCommitChanges(workspace, "touch README with no scope declared");
+  const outcome = await factory.claim({ task: "SC3", sha: sha2 });
+
+  assert.equal(outcome.verdict, "green");
+});
+
+test("unusable scope entries are rejected without touching the ledger", (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const { workspace, artifact } = makeWorkspace(dir);
+  const factory = createFactory({ stateDir: join(dir, "factory"), workspace });
+
+  for (const bad of [["/absolute/path"], ["../escape"], [""], ["ok", ".."]]) {
+    assert.throws(
+      () => factory.setContract({ task: "SC4", gate: "true", artifact, scope: bad as string[] }),
+      factoryErrorCode("invalid-contract"),
+      `scope ${JSON.stringify(bad)} must be rejected`,
+    );
+  }
+  assert.deepEqual([...factory.ledger.events], []);
+});
+
+test("a scoped contract refuses a workspace git cannot read", (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const workspace = join(dir, "plain");
+  mkdirSync(join(workspace, "src"), { recursive: true });
+  writeFileSync(join(workspace, "src", "format.ts"), "export function pad() {}\n");
+  const factory = createFactory({ stateDir: join(dir, "factory"), workspace });
+
+  assert.throws(
+    () => factory.setContract({ task: "SC5", gate: "true", artifact: "src/format.ts", scope: ["src"] }),
+    factoryErrorCode("invalid-contract"),
+  );
 });
 
 test("two tasks share one ledger with independent seq and reports", async (t) => {

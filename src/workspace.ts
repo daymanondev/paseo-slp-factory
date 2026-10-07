@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -67,8 +68,49 @@ export function checkCleanAt(cwd: string, expectedFull: string): Promise<TreeChe
   );
 }
 
+/**
+ * HEAD of the workspace, synchronously — recorded as a scoped Contract's diff
+ * base at the moment the Contract is set. Returns undefined when git cannot
+ * answer; setContract turns that into a refusal, never a silent null base.
+ */
+export function headCommitSync(cwd: string): string | undefined {
+  try {
+    const out = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+      timeout: GIT_TIMEOUT_MS,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    return /^[0-9a-f]{40}$/i.test(out) ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function git(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync("git", args, { cwd, timeout: GIT_TIMEOUT_MS });
+}
+
+/**
+ * Files the Attempt changed between the Contract's base commit and the claimed
+ * commit that fall outside every declared scope prefix (ticket 14): the task
+ * boundary is mechanical, not polite — an overreaching diff is never stamped
+ * green. A prefix owns itself and everything under it as a directory.
+ */
+export function changesOutsideScope(
+  cwd: string,
+  base: string,
+  claimed: string,
+  scope: readonly string[],
+): Promise<{ ok: true } | { ok: false; files: string[]; reason?: string }> {
+  return git(cwd, ["diff", "--name-only", base, claimed]).then(
+    ({ stdout }) => {
+      const changed = stdout.split("\n").map((line) => line.trim()).filter((line) => line !== "");
+      const outside = changed.filter((file) => !scope.some((prefix) => file === prefix || file.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)));
+      return outside.length === 0 ? { ok: true as const } : { ok: false as const, files: outside };
+    },
+    (err: unknown) => ({ ok: false as const, files: [], reason: gitDetail(err) }),
+  );
 }
 
 function gitDetail(err: unknown): string {

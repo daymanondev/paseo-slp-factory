@@ -25,6 +25,10 @@ export interface ContractSet {
   task: string;
   gate: string;
   artifact: string;
+  /** Path prefixes (workspace-relative) the task may touch. Omitted = unrestricted. */
+  scope?: string[];
+  /** The commit the Workspace sat at when the Contract was set — the diff base for the scope check. */
+  base?: string;
 }
 
 export interface ClaimReported {
