@@ -278,8 +278,8 @@ export function createFactory(options: FactoryOptions): Factory {
       if (!history.some((e) => e.event === "contract_set")) {
         throw new FactoryError("unknown-task", `no contract set for task ${task} — register one first`);
       }
-      const attemptEvents = history.filter((e) => e.event !== "contract_set" && e.attempt === attempt);
-      if (attemptEvents.length === 0) {
+      const events = attemptEvents(history, attempt);
+      if (events.length === 0) {
         throw new FactoryError("unknown-attempt", `task ${task} has no attempt ${attempt}`);
       }
       const priorAccept = history.findLast((e): e is AttemptAccepted => e.event === "attempt_accepted");
@@ -289,7 +289,7 @@ export function createFactory(options: FactoryOptions): Factory {
           `task ${task} was already accepted at attempt ${priorAccept.attempt}; the ledger is append-only`,
         );
       }
-      const gate = attemptEvents.findLast((e): e is GateFinished => e.event === "gate_finished");
+      const gate = events.findLast((e): e is GateFinished => e.event === "gate_finished");
       if (!gate || gate.verdict !== "green") {
         throw new FactoryError(
           "not-green",
@@ -318,13 +318,17 @@ function finish(
     note: result.note,
     ...(sha === undefined ? {} : { sha }),
   });
+  const reportPath = writeAttemptReport(task, attempt, ledger, stateDir);
+  return { attempt, verdict: result.verdict, gate, reportPath };
+}
 
-  const markdown = renderReport(task, attempt, ledger.events);
+/** Every Attempt ends the same way: report rendered from the ledger, written, acknowledged. */
+function writeAttemptReport(task: string, attempt: number, ledger: Ledger, stateDir: string): string {
+  const markdown = renderReport(task, attempt, ledger.eventsFor(task));
   const reportPath = join(stateDir, `report-${task}-${attempt}.md`);
   writeFileSync(reportPath, markdown);
   ledger.append({ event: "report_written", task, attempt, path: reportPath });
-
-  return { attempt, verdict: result.verdict, gate, reportPath };
+  return reportPath;
 }
 
 /** The highest Attempt number a task's history mentions, or 0 when none opened yet. */
@@ -336,14 +340,19 @@ function maxAttempt(history: readonly LedgerEvent[]): number {
   return max;
 }
 
+/** One Attempt's own events — the Contract belongs to the Task, not to any Attempt. */
+function attemptEvents(history: readonly LedgerEvent[], attempt: number): LedgerEvent[] {
+  return history.filter((e) => e.event !== "contract_set" && e.attempt === attempt);
+}
+
 /**
  * An Attempt is open while its report is not written — after gate_finished the
  * report lands in the same synchronous turn, so in practice this means "the
  * gate is running" (the only await between gate_started and report_written).
  */
 function attemptIsOpen(history: readonly LedgerEvent[], attempt: number): boolean {
-  const attemptEvents = history.filter((e) => e.event !== "contract_set" && e.attempt === attempt);
-  return attemptEvents.length > 0 && !attemptEvents.some((e) => e.event === "report_written");
+  const events = attemptEvents(history, attempt);
+  return events.length > 0 && !events.some((e) => e.event === "report_written");
 }
 
 /**
@@ -359,8 +368,7 @@ function recoverInterruptedAttempts(ledger: Ledger, stateDir: string): { task: s
     const history = ledger.eventsFor(task);
     for (let attempt = 1; attempt <= maxAttempt(history); attempt++) {
       if (!attemptIsOpen(history, attempt)) continue;
-      const attemptEvents = history.filter((e) => e.event !== "contract_set" && e.attempt === attempt);
-      const gateStarted = attemptEvents.some((e) => e.event === "gate_started");
+      const gateStarted = attemptEvents(history, attempt).some((e) => e.event === "gate_started");
       ledger.append({
         event: "gate_finished",
         task,
@@ -371,10 +379,7 @@ function recoverInterruptedAttempts(ledger: Ledger, stateDir: string): { task: s
           ? "interrupted — the factory restarted before the Gate finished"
           : "interrupted — the factory restarted before the Gate started",
       });
-      const markdown = renderReport(task, attempt, ledger.events);
-      const reportPath = join(stateDir, `report-${task}-${attempt}.md`);
-      writeFileSync(reportPath, markdown);
-      ledger.append({ event: "report_written", task, attempt, path: reportPath });
+      writeAttemptReport(task, attempt, ledger, stateDir);
       recovered.push({ task, attempt });
     }
   }

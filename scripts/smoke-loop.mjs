@@ -10,9 +10,10 @@
  * reports behind on purpose — they are the audit trail of this run.
  *
  * Usage:
- *   node scripts/smoke-loop.mjs --home ~/.paseo-factory
+ *   node scripts/smoke-loop.mjs --home ~/.paseo-factory [--keep]
  *
  * --home is required on purpose: never point this at the default ~/.paseo.
+ * --keep leaves the scratch workspace behind instead of deleting it.
  */
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -26,8 +27,7 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const argv = process.argv.slice(2);
 const homeFlag = argv.includes("--home") ? argv[argv.indexOf("--home") + 1] : undefined;
-if (argv.includes("--keep")) argv.splice(argv.indexOf("--keep"), 1);
-const keep = process.argv.includes("--keep");
+const keep = argv.includes("--keep");
 if (homeFlag === undefined || homeFlag === "") {
   console.error("smoke: --home <paseoHome> is required (point it at the trial daemon, never ~/.paseo)");
   process.exit(2);

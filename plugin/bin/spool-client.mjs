@@ -20,10 +20,10 @@ export function stateDirFor(paseoHome) {
 }
 
 /** `--home` flag > `PASEO_HOME` > `~/.paseo`, with `~` expansion. */
-export function resolveHome({ flag, env = process.env, homeDir = homedir() }) {
-  const raw = flag ?? (env.PASEO_HOME && env.PASEO_HOME.trim() !== "" ? env.PASEO_HOME : join(homeDir, ".paseo"));
-  if (raw === "~") return homeDir;
-  if (raw.startsWith("~/")) return join(homeDir, raw.slice(2));
+export function resolveHome(flag) {
+  const raw = flag ?? (process.env.PASEO_HOME && process.env.PASEO_HOME.trim() !== "" ? process.env.PASEO_HOME : join(homedir(), ".paseo"));
+  if (raw === "~") return homedir();
+  if (raw.startsWith("~/")) return join(homedir(), raw.slice(2));
   return raw;
 }
 
@@ -70,6 +70,11 @@ export function awaitReply(spoolRoot, id, timeoutMs, pollMs = 200) {
   });
 }
 
+/**
+ * Time-prefixed, so request filenames sort in submission order: the plugin
+ * drains the requests directory in name order, and a contract submitted just
+ * before its claim must not be overtaken.
+ */
 export function randomId() {
-  return globalThis.crypto.randomUUID();
+  return `${Date.now().toString(36)}-${globalThis.crypto.randomUUID().slice(0, 8)}`;
 }

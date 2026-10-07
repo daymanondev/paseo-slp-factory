@@ -59,7 +59,7 @@ if (!Number.isFinite(waitSecs) || waitSecs <= 0) {
   process.exit(2);
 }
 
-const stateDir = process.env.FACTORY_STATE_DIR ?? stateDirFor(resolveHome({}));
+const stateDir = process.env.FACTORY_STATE_DIR ?? stateDirFor(resolveHome());
 const spoolRoot = spoolRootFor(stateDir);
 
 const request = {

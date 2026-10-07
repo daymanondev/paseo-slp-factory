@@ -11,7 +11,8 @@
  * the CLI never touches the ledger. The home defaults to `PASEO_HOME` or
  * `~/.paseo`; against the trial daemon pass `--home ~/.paseo-factory`.
  *
- * Exit codes: 0 done · 2 not done (bad usage, rejected, no reply).
+ * Exit codes: 0 the command succeeded · 2 it did not (bad usage, rejected by
+ * the factory, or no reply from the plugin).
  */
 import { parseArgs } from "node:util";
 import { resolve as resolvePath } from "node:path";
@@ -62,7 +63,7 @@ if (command === "--help" || command === "help" || command === undefined) {
   process.exit(command === undefined ? 2 : 0);
 }
 
-const stateDir = stateDirFor(resolveHome({ flag: homeFlag }));
+const stateDir = stateDirFor(resolveHome(homeFlag));
 const spoolRoot = spoolRootFor(stateDir);
 
 function parseCommandOptions(spec) {

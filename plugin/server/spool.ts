@@ -108,7 +108,13 @@ export function parseSpoolRequest(body: unknown): SpoolRequest | undefined {
 export async function handleSpoolRequest(factory: Factory, request: SpoolRequest): Promise<SpoolReply> {
   try {
     if (request.kind === "contract") {
-      factory.setContract(request);
+      factory.setContract({
+        task: request.task,
+        workspace: request.workspace,
+        gate: request.gate,
+        artifact: request.artifact,
+        ...(request.scope === undefined ? {} : { scope: request.scope }),
+      });
       return { id: request.id, ok: true, summary: `contract set for ${request.task}: \`${request.gate}\` in ${request.workspace}` };
     }
     if (request.kind === "claim") {
@@ -146,8 +152,6 @@ export interface SpoolOptions {
 }
 
 export interface Spool {
-  /** Looks for new requests right now (the start call does one immediately). */
-  drain(): void;
   stop(): void;
 }
 
@@ -192,7 +196,6 @@ export function startSpool(stateDir: string, factory: Factory, options: SpoolOpt
   const timer = setInterval(drain, options.pollMs ?? 250);
   drain();
   return {
-    drain,
     stop() {
       clearInterval(timer);
     },
