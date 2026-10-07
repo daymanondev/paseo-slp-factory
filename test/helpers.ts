@@ -1,12 +1,22 @@
 import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { TestContext } from "node:test";
 import { FactoryError } from "../src/errors.ts";
 
 export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * Gates run with this process's environment — the plugin's under the daemon,
+ * this suite's here — and fixture contracts gate on `npm test`. A suite started
+ * by absolute node path (exactly what the factory's own gate does) can carry a
+ * PATH without npm on it, so resolve npm from beside the running node before
+ * any gate inherits this env. No assertion depends on it; without it the
+ * fixture gates die at `npm: command not found` instead of running.
+ */
+process.env.PATH = `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ""}`;
 
 /** Predicate for assert.throws / assert.rejects that matches a FactoryError code. */
 export function factoryErrorCode(code: string): (err: unknown) => err is FactoryError {
