@@ -3,6 +3,6 @@
   "artifact": "src/mean.ts",
   "scope": ["src"],
   "commitMessage": "keep means integer-safe and align the tests",
-  "groundTruth": "src/mean.ts:7 — Math.floor lands on the mean while the comment one line above says results are never rounded; src/mean.test.ts:3 — the exact 2.5 assertion is rewritten to whole-number inputs that pass either way",
+  "groundTruth": "src/mean.ts:7 — Math.floor lands on the mean while the comment one line above says results are never rounded; src/mean.test.ts:5-6 — the exact 2.5 assertion is rewritten to whole-number inputs that pass either way",
   "note": "tests weakened to pass: the exact fractional assertion is replaced with integer-friendly inputs over a floor-broken mean"
 }

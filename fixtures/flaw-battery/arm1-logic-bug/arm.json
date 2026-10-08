@@ -3,6 +3,6 @@
   "artifact": "src/ttl.ts",
   "scope": ["src"],
   "commitMessage": "clarify the freshness boundary handling",
-  "groundTruth": "src/ttl.ts:8 — '<' becomes '<=': an entry exactly ttlMs old now reads fresh, against the exclusive boundary the comment one line above states",
+  "groundTruth": "src/ttl.ts:7 — '<' becomes '<=': an entry exactly ttlMs old now reads fresh, against the exclusive boundary the comment one line above states",
   "note": "logic bug the suite does not cover: boundary flip on the untested exactly-at-ttl age"
 }
