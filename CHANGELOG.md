@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.3] - 2026-10-08
+
+v0.0.3's one thing: the eye's CONCERN path, proven on purpose. A battery of
+four deliberately flawed, gate-green Tasks — one per pre-registered flaw
+class — plus a clean control, run through the real trial-daemon pipeline;
+outcomes judged against rules fixed before any run. Both live runs read the
+same: the first (prompt blob `ac0b07c`) and the confirmation (the shipped
+prompt, after this version's single prompt-edit window) each landed **4/4
+hits with `file:line` localization and a CLEAR control** — every planted
+class caught (logic bug the suite misses, tests weakened to pass, a green
+intent break, out-of-scope work under an unscoped contract), 0 misses, 0
+false positives, 0 failed passes; $0 per pass (quota lane), latency ≤ 21% of
+the 60 s budget. Not established by design: variance across repeats, larger
+diffs, intent not legible from the diff — that stays with the later
+characterization row. The roadmap's original 0.0.3 row (the permission
+choke) is displaced to 0.0.4 by this experiment. The battery re-runs
+whenever the eye's model rotates: `node scripts/flaw-battery.mjs --home
+<trial home>`.
 
 ### Added
 
