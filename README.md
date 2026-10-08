@@ -76,6 +76,15 @@ The mechanical loop without an agent is one command:
 node scripts/smoke-loop.mjs --home ~/.paseo-factory   # contract → red → green → accept
 ```
 
+The flaw battery plants deliberately flawed, gate-green work in fixture
+workspaces and runs each arm through the same pipeline with `--fresh-eyes` —
+the instrument for measuring whether the eye says CONCERN on purpose (four
+flaw classes plus a clean control, pre-registered rules in the effort map):
+
+```sh
+node scripts/flaw-battery.mjs --home ~/.paseo-factory   # all arms; --arm <name> re-runs one
+```
+
 State lives under `<daemon home>/plugin-state/paseo-factory/` — the ledger,
 per-attempt reports, the spool (`requests/`, `replies/`, `processed/`), and the
 generated `bin/factory-claim` wrapper that rides agent PATHs.
