@@ -88,7 +88,7 @@ test("status tracks a whole loop: contract → red claim → green claim → acc
   // A contract with no attempts yet: counts start at zero, nothing to show.
   const idle = await run(ownerCli, ["status"], ownerEnv);
   assert.equal(idle.status, 0, idle.stderr);
-  assert.equal(idle.stdout, "LOOP9 attempts=0 verdict=- sha=- accepted=no\n");
+  assert.equal(idle.stdout, "LOOP9 attempts=0 verdict=- sha=- accepted=no eye=-\n");
 
   // Attempt 1: a claim whose sha resolves to nothing is red before the gate
   // even runs — so this attempt has no attested sha to show.
@@ -96,21 +96,21 @@ test("status tracks a whole loop: contract → red claim → green claim → acc
   assert.equal(red.status, 1, `expected red\nstdout: ${red.stdout}\nstderr: ${red.stderr}`);
   const afterRed = await run(ownerCli, ["status"], ownerEnv);
   assert.equal(afterRed.status, 0, afterRed.stderr);
-  assert.equal(afterRed.stdout, "LOOP9 attempts=1 verdict=red sha=- accepted=no\n");
+  assert.equal(afterRed.stdout, "LOOP9 attempts=1 verdict=red sha=- accepted=no eye=-\n");
 
   // Attempt 2: the real commit — green, and the verdict attests it (short sha).
   const green = await run(claimCli, ["--task", "LOOP9", "--sha", baseSha, "--wait-secs", "60"], agentEnv);
   assert.equal(green.status, 0, `expected green\nstdout: ${green.stdout}\nstderr: ${green.stderr}`);
   const afterGreen = await run(ownerCli, ["status"], ownerEnv);
   assert.equal(afterGreen.status, 0, afterGreen.stderr);
-  assert.equal(afterGreen.stdout, `LOOP9 attempts=2 verdict=green sha=${baseSha.slice(0, 7)} accepted=no\n`);
+  assert.equal(afterGreen.stdout, `LOOP9 attempts=2 verdict=green sha=${baseSha.slice(0, 7)} accepted=no eye=-\n`);
 
   // Acceptance is the Owner's act; status shows its effect on the task.
   const accept = await run(ownerCli, ["accept", "LOOP9", "--attempt", "2"], ownerEnv);
   assert.equal(accept.status, 0, accept.stderr);
   const afterAccept = await run(ownerCli, ["status"], ownerEnv);
   assert.equal(afterAccept.status, 0, afterAccept.stderr);
-  assert.equal(afterAccept.stdout, `LOOP9 attempts=2 verdict=green sha=${baseSha.slice(0, 7)} accepted=yes\n`);
+  assert.equal(afterAccept.stdout, `LOOP9 attempts=2 verdict=green sha=${baseSha.slice(0, 7)} accepted=yes eye=-\n`);
 });
 
 test("status prints one line per task in first-appearance order, including mid-gate tasks", async (t) => {
@@ -125,8 +125,8 @@ test("status prints one line per task in first-appearance order, including mid-g
     { seq: 4, ts, event: "claim_reported", task: "T-BETA", attempt: 1, sha: full, agent: "agent-1" },
     { seq: 5, ts, event: "gate_started", task: "T-BETA", attempt: 1, cmd: "true" },
     { seq: 6, ts, event: "gate_finished", task: "T-BETA", attempt: 1, exit: 0, verdict: "green", note: "", sha: full },
-    // v0.0.2's advisory line: status must read through it — the task view does
-    // not change because of the eye.
+    // v0.0.2's advisory line: status reads through it and shows its outcome as
+    // the task's eye field (clear here — the last eye on record).
     { seq: 7, ts, event: "fresh_eyes_written", task: "T-BETA", attempt: 1, model: "gemini-3.8-flash-high", outcome: "clear", finding: "nothing to add.", durationMs: 900 },
     { seq: 8, ts, event: "report_written", task: "T-BETA", attempt: 1, path: "/s/report-T-BETA-1.md" },
     { seq: 9, ts, event: "attempt_accepted", task: "T-BETA", attempt: 1 },
@@ -140,9 +140,54 @@ test("status prints one line per task in first-appearance order, including mid-g
   assert.equal(
     status.stdout,
     [
-      "T-BETA attempts=1 verdict=green sha=a1b2c3d accepted=yes",
-      "T-ALPHA attempts=1 verdict=- sha=- accepted=no",
-      "T-GAMMA attempts=0 verdict=- sha=- accepted=no",
+      "T-BETA attempts=1 verdict=green sha=a1b2c3d accepted=yes eye=clear",
+      "T-ALPHA attempts=1 verdict=- sha=- accepted=no eye=-",
+      "T-GAMMA attempts=0 verdict=- sha=- accepted=no eye=-",
+    ].join("\n") + "\n",
+  );
+});
+
+test("status shows the last fresh-eyes outcome per task, or - when the task has none", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const stateDir = join(dir, "plugin-state", "paseo-factory");
+  const full = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
+
+  function eyeEvent(seq: number, task: string, attempt: number, outcome: string): Record<string, unknown> {
+    return { seq, ts, event: "fresh_eyes_written", task, attempt, model: "gemini-3.8-flash-high", outcome, finding: "nothing to add.", durationMs: 900 };
+  }
+
+  writeLedger(stateDir, [
+    contractEvent(1, "E-CONCERN"),
+    { seq: 2, ts, event: "claim_reported", task: "E-CONCERN", attempt: 1, sha: full, agent: "agent-1" },
+    { seq: 3, ts, event: "gate_finished", task: "E-CONCERN", attempt: 1, exit: 0, verdict: "green", note: "", sha: full },
+    eyeEvent(4, "E-CONCERN", 1, "concern"),
+    contractEvent(5, "E-CLEAR"),
+    { seq: 6, ts, event: "claim_reported", task: "E-CLEAR", attempt: 1, sha: full, agent: "agent-1" },
+    { seq: 7, ts, event: "gate_finished", task: "E-CLEAR", attempt: 1, exit: 0, verdict: "green", note: "", sha: full },
+    eyeEvent(8, "E-CLEAR", 1, "concern"),
+    { seq: 9, ts, event: "claim_reported", task: "E-CLEAR", attempt: 2, sha: full, agent: "agent-1" },
+    { seq: 10, ts, event: "gate_finished", task: "E-CLEAR", attempt: 2, exit: 0, verdict: "green", note: "", sha: full },
+    eyeEvent(11, "E-CLEAR", 2, "clear"), // the last eye on record wins, not the first
+    contractEvent(12, "E-FAILED"),
+    { seq: 13, ts, event: "claim_reported", task: "E-FAILED", attempt: 1, sha: full, agent: "agent-1" },
+    { seq: 14, ts, event: "gate_finished", task: "E-FAILED", attempt: 1, exit: 0, verdict: "green", note: "", sha: full },
+    eyeEvent(15, "E-FAILED", 1, "failed"),
+    contractEvent(16, "E-NONE"),
+    { seq: 17, ts, event: "claim_reported", task: "E-NONE", attempt: 1, sha: full, agent: "agent-1" },
+    { seq: 18, ts, event: "gate_finished", task: "E-NONE", attempt: 1, exit: 0, verdict: "green", note: "", sha: full },
+    // ...and no fresh_eyes_written for E-NONE: the pass never ran on this task.
+  ]);
+
+  const status = await run(ownerCli, ["status"], { PASEO_HOME: dir });
+  assert.equal(status.status, 0, status.stderr);
+  assert.equal(
+    status.stdout,
+    [
+      "E-CONCERN attempts=1 verdict=green sha=a1b2c3d accepted=no eye=concern",
+      "E-CLEAR attempts=2 verdict=green sha=a1b2c3d accepted=no eye=clear",
+      "E-FAILED attempts=1 verdict=green sha=a1b2c3d accepted=no eye=failed",
+      "E-NONE attempts=1 verdict=green sha=a1b2c3d accepted=no eye=-",
     ].join("\n") + "\n",
   );
 });
@@ -205,7 +250,7 @@ test("an unterminated last ledger line is ignored, not printed (it was never ack
 
   const result = await run(ownerCli, ["status"], { PASEO_HOME: dir });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, "T1 attempts=0 verdict=- sha=- accepted=no\n");
+  assert.equal(result.stdout, "T1 attempts=0 verdict=- sha=- accepted=no eye=-\n");
 });
 
 test("a read error that is not a missing file is reported, not swallowed", async (t) => {

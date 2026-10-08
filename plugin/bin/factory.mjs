@@ -39,8 +39,8 @@ commands:
              accept <task> --attempt <n>
 
   status     Print one line per task from the ledger — attempts, last verdict,
-             attested sha (short), accepted. A local read; the plugin need not
-             be running.
+             attested sha (short), accepted, last fresh-eyes outcome. A local
+             read; the plugin need not be running.
 
 options:
   --home <paseoHome>   daemon home (default: $PASEO_HOME or ~/.paseo)
@@ -233,7 +233,7 @@ function statusLines(events) {
   for (const evt of events) {
     let state = byTask.get(evt.task);
     if (state === undefined) {
-      state = { attempts: 0, verdict: undefined, sha: undefined, accepted: false };
+      state = { attempts: 0, verdict: undefined, sha: undefined, eye: undefined, accepted: false };
       byTask.set(evt.task, state);
       order.push(evt.task);
     }
@@ -243,11 +243,14 @@ function statusLines(events) {
       state.verdict = evt.verdict; // the last verdict on record, even while a newer attempt runs
       state.sha = typeof evt.sha === "string" ? evt.sha.slice(0, 7) : undefined; // git's short length
     }
+    if (evt.event === "fresh_eyes_written") {
+      state.eye = typeof evt.outcome === "string" ? evt.outcome : undefined; // the last eye on record
+    }
     if (evt.event === "attempt_accepted") state.accepted = true;
   }
   return order.map((task) => {
     const s = byTask.get(task);
-    return `${task} attempts=${s.attempts} verdict=${s.verdict ?? "-"} sha=${s.sha ?? "-"} accepted=${s.accepted ? "yes" : "no"}`;
+    return `${task} attempts=${s.attempts} verdict=${s.verdict ?? "-"} sha=${s.sha ?? "-"} accepted=${s.accepted ? "yes" : "no"} eye=${s.eye ?? "-"}`;
   });
 }
 
