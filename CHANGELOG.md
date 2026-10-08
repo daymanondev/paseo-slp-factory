@@ -7,12 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.2] — fresh-eyes station (unreleased; PR open)
+## [0.0.2] - 2026-10-08
 
 v0.0.2's one thing: after a green Verdict, a different model — called by direct
 API from the plugin, no harness (ADR 0005) — reads the Contract, the diff and
 the full gate output, and appends one advisory line to the ledger. Evidence for
 the Owner, never a second Verdict. Default off; the Contract marks it on.
+Proven by live run 2 (2026-10-08): one attempt, gate green, the eye `clear` in
+3956 ms — and the run's own working agent taught `factory status` to show it.
 
 ### Added
 
@@ -66,6 +68,12 @@ the Owner, never a second Verdict. Default off; the Contract marks it on.
   `gate_finished` (a restart during the eye's window is the one place that
   happens) gets only its missing report written on reopen — never a second,
   red `gate_finished` over a verdict that already landed.
+- `factory status` shows each task's last fresh-eyes outcome: every line gains a
+  trailing ` eye=<concern|clear|failed|->` (last-wins; `-` when the pass never ran
+  on that task), so the Owner's one-glance view sees the station's output. Built
+  by the v0.0.2 live run itself (ticket 06): a working agent under a scoped
+  contract (`plugin/bin` + `test`), judged green then read `clear` by the eye's
+  first real-task pass — the loop shipped the feature that surfaces it.
 
 ## [0.0.1] - 2026-10-07
 
