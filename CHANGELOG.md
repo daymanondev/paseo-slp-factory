@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (fake eye API + the real CLIs over an in-process spool): per-arm sequences,
   scope wiring, the re-run rule, and exit-reflects-outcomes.
 
+### Changed
+
+- The eye's CLEAR discipline (v0.0.3's single prompt-edit window): the
+  answer-shape line now bounds a CLEAR finding to "at most one sentence or
+  nothing at all" — CONCERN findings keep their ≤120-words + `path:line`
+  discipline untouched. Rider justified by ticket 06's 46-word CLEAR and the
+  battery's own control arm (a four-sentence CLEAR); prompt-only, no parser
+  change. Measured by a clean full battery re-run before the version tag
+  (the shipped prompt's per-arm outcomes, recorded in the version notes).
+- `CONTEXT.md` gains the battery's vocabulary — Flaw battery, Arm, and the
+  Battery outcome comparison words (hit / miss / noisy hit / false positive /
+  failed) — now that the battery ships as a public, re-runnable artifact.
+
 ## [0.0.2] - 2026-10-08
 
 v0.0.2's one thing: after a green Verdict, a different model — called by direct

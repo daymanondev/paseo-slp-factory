@@ -60,6 +60,18 @@ _Avoid_: done, finished, complete, passed
 A second judgment of a green Attempt by a different model that took no part in writing it — one direct-API read of the Contract, the diff and the gate output, appending one advisory ledger line (`fresh_eyes_written`). Evidence for the Owner, never acceptance; off unless the Contract marks it on. Added in v0.0.2.
 _Avoid_: mắt soi (outside research notes), code review, self-review
 
+**Flaw battery**:
+A set of deliberately flawed, gate-green Tasks — plus one clean control — run through the real pipeline to measure whether the fresh-eyes review catches what the Gate cannot. The runner never judges outcomes and never accepts; comparing findings against planted ground truth is the operator's act. Added in v0.0.3.
+_Avoid_: test suite, eval harness, mutation suite
+
+**Arm**:
+One member of a flaw battery: a Workspace carrying one planted flaw (or none, in the control), its Contract, and the ground truth a finding is compared against.
+_Avoid_: case, scenario, fixture (that names the files)
+
+**Battery outcome**:
+The comparison words for one arm against ground truth: hit (CONCERN citing the planted flaw), miss (CLEAR on a flawed arm), noisy hit (CONCERN citing only non-planted nits), false positive (CONCERN on the clean control), failed (technical).
+_Avoid_: pass/fail (those are Verdict words)
+
 **Retro**:
 A scheduled fresh-context pass that reads the Ledger, Reports and gate notes and emits proposals — new Gate checks for repeated failures, draft Contracts for knowledge gaps. It never applies its own proposals.
 _Avoid_: retrospective (the agile ceremony), postmortem

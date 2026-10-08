@@ -170,7 +170,7 @@ async function buildEyePrompt(input: FreshEyesPassInput): Promise<{ ok: true; pr
     "",
     "Answer with this exact shape:",
     "- First line: CONCERN (something deserves the Owner's attention) or CLEAR (nothing to add).",
-    `- Then at most 120 words. When raising a concern, cite file and line from the diff (path:line). Report only what the gate could not check: logic the tests miss, a change that breaks the contract's intent, work outside the declared scope, tests weakened to pass. Style nits and speculation are noise.`,
+    `- Then at most 120 words when raising a concern — cite file and line from the diff (path:line). When CLEAR, at most one sentence or nothing at all. Report only what the gate could not check: logic the tests miss, a change that breaks the contract's intent, work outside the declared scope, tests weakened to pass. Style nits and speculation are noise.`,
   ].join("\n");
   return { ok: true, prompt };
 }
