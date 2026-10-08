@@ -1,0 +1,8 @@
+{
+  "taskPrefix": "a3-uploader-strict-2xx",
+  "artifact": "src/reporter.ts",
+  "scope": ["src"],
+  "commitMessage": "treat redirect statuses as delivered",
+  "groundTruth": "src/reporter.ts:8 — the success bound widens from <300 to <400 while the comment above (and the task id a3-uploader-strict-2xx) say only 2xx is sent; a 3xx now counts as delivered",
+  "note": "green work that breaks the contract's intent: the success predicate is loosened past the strict-2xx rule the task id and the diff's own context state"
+}

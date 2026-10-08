@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The flaw battery — the v0.0.3 concern-path experiment's instrument
+  (ticket 02): `fixtures/flaw-battery/` (four flaw arms, one per
+  pre-registered class — logic bug the suite misses, tests weakened to pass,
+  green work that breaks the contract's intent, out-of-scope work under an
+  unscoped contract — plus a clean control; each arm a clean `workspace/`, a
+  `flaw/` overlay planted as the work commit, and an `arm.json` carrying the
+  task prefix, scope, and ground truth) and `scripts/flaw-battery.mjs`, the
+  runner: clone → contract (`--fresh-eyes`) → plant → claim → assert the
+  six-event ledger sequence → one outcome+finding line per arm. A technically
+  `failed` eye gets exactly one re-run of that arm. The runner never judges
+  hit/miss (the operator's act against the map's pre-registered rules) and
+  never accepts anything. Proven hermetically by `test/flaw-battery.test.ts`
+  (fake eye API + the real CLIs over an in-process spool): per-arm sequences,
+  scope wiring, the re-run rule, and exit-reflects-outcomes.
+
 ## [0.0.2] - 2026-10-08
 
 v0.0.2's one thing: after a green Verdict, a different model — called by direct
