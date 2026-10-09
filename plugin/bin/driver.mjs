@@ -80,6 +80,11 @@ export function splitProvider(value) {
   return slash === -1 ? { provider: value, model: undefined } : { provider: value.slice(0, slash), model: value.slice(slash + 1) };
 }
 
+/** The startup banner echoes the CLI's provider argument verbatim, once. */
+export function renderRunBanner(tasks, provider) {
+  return `factory: run ${tasks.join(" ")} (n=${tasks.length}) — provider ${provider}`;
+}
+
 // ---- the ledger, read locally (the plugin is the only writer — never this file) -----------------
 
 /**
@@ -591,7 +596,7 @@ export async function runDriver({ home, stateDir, spoolRoot, tasks, provider, wa
     problems.push(task);
   };
   const { provider: providerId, model } = splitProvider(provider);
-  say(`factory: run ${tasks.join(" ")} (n=${tasks.length}) — provider ${provider}${model === undefined ? "" : `/${model}`}`);
+  say(renderRunBanner(tasks, provider));
 
   // The daemon is preflighted before any spawn line lands in the ledger: a
   // dispatched spawn with no agent behind it would be a lie the ledger keeps.

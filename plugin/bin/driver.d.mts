@@ -10,6 +10,7 @@ export declare const STALL_WARN_MS: number;
 
 export declare function renderBrief(task: string, pathValue: string, description?: string): string;
 export declare function splitProvider(value: string): { provider: string; model: string | undefined };
+export declare function renderRunBanner(tasks: readonly string[], provider: string): string;
 
 export declare function readDriverLedger(stateDir: string): Record<string, unknown>[];
 export declare function contractFromLedger(events: readonly Record<string, unknown>[], task: string): Record<string, unknown> | undefined;
