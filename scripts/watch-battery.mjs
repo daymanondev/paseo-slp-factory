@@ -61,7 +61,7 @@ const flag = (name) => {
 };
 const homeFlag = flag("--home");
 const armFlag = flag("--arm");
-const providerFlag = flag("--provider") ?? "copilot/claude-sonnet-4.6";
+const providerFlag = flag("--provider") ?? "copilot/gpt-5.4";
 const batchSize = Number(flag("--batch-size") ?? 3);
 const waitMins = Number(flag("--wait-mins") ?? 60);
 const keep = argv.includes("--keep");
