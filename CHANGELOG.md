@@ -5,6 +5,94 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-10-10
+
+v0.0.7's one thing: the Retro. `factory retro` — the Owner's on-demand act,
+one pass per invocation — distills the whole trial ledger into a per-task
+digest (contracts with their descriptions verbatim, full attempt lifecycles,
+watch/eye findings verbatim, every denial with its reason, the permit parade
+rolled to one count line), adds all 45 reports whole and the 3 red gate logs,
+and hands the measured ≈119K chars to a fresh-context Copilot chat model
+(`gpt-5.4`, pinned in code, prompted headless through the daemon's `copilot`
+CLI — the watch's lane, $0 marginal) with one job: **propose**. New gate
+checks for repeated-error patterns, draft Contract language for knowledge
+holes, observations for the Owner's attention — every proposal carrying its
+ledger seq evidence. One `retro_written` line plus one `retro-<date>.md`
+proposals file, nothing else: the factory proposes, never applies, never
+judges, never notifies — nothing becomes law until the Owner ratifies as
+ordinary repo work. Proven by the first live read on the REAL accumulated
+corpus (ticket 05 — ground truth pre-registered in the ticket before any
+run, 9 patterns with seq evidence plus the must-not-propose lanes): one
+pass, one try, **74.6 s of the 600 s budget, `retro_written` seq 1334, 7
+proposals in `retro-2026-10-09.md`** (corpus at run: 1,333 events · 83 task
+blocks · 45 reports · 3 red gate logs; $0 marginal). Judged against the
+registration: **7/9 registered patterns proposed → 7 hits (6 proposals — R1
+covers two patterns), 0 noisy hits, 0 false positives, 0 noise per
+proposal** — every proposal's citations re-verified against the actual
+ledger lines; the prompt's EXISTING-LAW section held (zero restatements of
+the choke/watch/scope/artifact laws); the unverifiable-from-corpus lane drew
+nothing; one beyond-ground-truth proposal (R3) read and verified valid.
+The roadmap row's two questions, answered with the measured numbers: *can a
+repeated error become a gate check?* — **yes, when the error leaves
+findings**: R1 is exactly that, a mechanical spec-drift check proposal grown
+from 8 cited eye findings across four flaw classes, and R2/R5/R6 are
+contract wording a future gate could enforce; the honest boundary — repeated
+errors that leave *silence* (the denied-step stall; the 36 tasks spawned
+and never claimed) went unread at n=1, so absence-shaped patterns need a
+different lane than the finding-reading pass; *how noisy are the
+proposals?* — **zero at n=1 by the pre-registered words**: precision 7/7
+valid, recall 7/9 registered, 0 law restatements, 0 unverifiables. All 7
+proposals land for the Owner's read **unratified** — ratification is his
+act as ordinary repo work (a PR per ratified proposal or one batch PR, map
+charting decision 6), never a factory event, and not this version's to
+wait for. Riding the version (rider #1, map charting decision 4 — the
+v0.0.6 close's survive/keep call, Andrew-ratified at charting): **the watch
+shrinks to its four mechanical-evidence keepers** — test-weakened,
+stuck-loop, scope-creep, secret-leak (all ≥ 0.99 on their plants with a
+clean gap around 0.5: control 0.08, ordinary work 0.42) — dropping the
+three conversational questions (≤ 0.18 on theirs; the code tier already
+catches fake-done via `artifact_check`), destructive-writes re-arm
+deferred to the 0.0.8 watch-battery occasion.
+
+### Added
+
+- The Retro pass (tickets 03–04, PR #26): `src/retro.ts` — the
+  whole-ledger digest (per-task blocks in first-seen order, `gate_started`
+  dropped as byte-identical to the contract gate 45/45, denials verbatim
+  with only the PATH boilerplate stripped, red gate logs attached to their
+  attempts, prior Retros as factory-level one-liners, untasked git blocks
+  kept as factory-level evidence), the prompt with its five-line
+  EXISTING-LAW section, the strict whole-parse JSON contract (`{class:
+  gate-check | contract-draft | observation, evidence seqs, pattern, text}`
+  — cited seqs validated against the ledger, factory-assigned R1…Rn ids,
+  parse failures retried once, the one Watch deviation; 600 s one-clock
+  budget; the Watch's `runCopilot` lifted verbatim); `retro_written {model,
+  outcome, durationMs, error?, proposalsPath?, proposalCount?}` — the
+  first factory-level ledger event; the proposals file is written first,
+  then the line; technical failures land a visible `failed` line with no
+  file; a same-day success refuses a re-run (the message points at today's
+  file); no `retro_refused` — refusals exit 2, no line.
+- `factory retro` behind a new `retro` spool request kind (ADR 0004's
+  one-writer law holds — the plugin validates and appends the line): the
+  CLI (`--wait-secs` default 660, exit 0/2, stdout = proposal count + file
+  path), one trailing retro line on `factory status` (`retro last=<day>
+  outcome=… proposals=<n>` — keyed on the last retro regardless of
+  outcome, failures visible, the verdict/eye convention), and the mirrored
+  CLI vocabularies join `retro_written`, drift-guarded. Hermetic tests
+  throughout (fake `CopilotRunner` seam, in-process spool, real CLI
+  halves).
+
+### Changed
+
+- Rider #1 — the watch shrinks to four questions: keep test-weakened,
+  stuck-loop, scope-creep, secret-leak; drop fake-done, unverified-claims,
+  self-accept. Question table, `code_answers`, prompt, tests, and the
+  watch battery's arms follow the shrink (arm1/arm3/arm4/arm7 deleted; the
+  battery README notes arm1's 0.0.8 return).
+- `CONTEXT.md` gains the version's vocabulary — Retro, Proposal,
+  Ratification (ratified at design time, ticket 03) — and the Watch terms
+  follow the shrink.
+
 ## [0.0.6] - 2026-10-09
 
 v0.0.6's one thing: the watch. After every Verdict — red included — a
