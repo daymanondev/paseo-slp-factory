@@ -61,8 +61,8 @@ export interface ContractInput {
   /**
    * Marks the watch pass ON for this task (v0.0.6; ADR 0005 symmetry — off
    * unless marked). Runs post-verdict on BOTH verdicts, record-only. The
-   * model and endpoint are pinned in code; the key is plugin-level config
-   * (`<stateDir>/watch.json`), never a Contract field.
+   * model is pinned in code and prompted through the daemon's `copilot`
+   * CLI — the CLI carries the watch's auth, there is no key file.
    */
   watch?: true;
   /**
