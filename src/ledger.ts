@@ -119,7 +119,9 @@ export class Ledger {
  * positive-integer Attempt on every post-Contract event; the v0.0.4 choke
  * events carry none — permit events need their task and agent, `git_blocked`
  * needs its command/rule/cwd/blockId and may lack a task entirely (the shim
- * refuses no matter who runs it, bindable or not).
+ * refuses no matter who runs it, bindable or not). The v0.0.5 spawn events
+ * carry none either — they precede any attempt — and need their task,
+ * provider, arity, and (for a refusal) rule and reason.
  */
 function shapeIsValid(evt: LedgerEvent): boolean {
   const asRecord = evt as unknown as Record<string, unknown>;
@@ -136,6 +138,16 @@ function shapeIsValid(evt: LedgerEvent): boolean {
       typeof asRecord.rule === "string" &&
       typeof asRecord.cwd === "string" &&
       typeof asRecord.blockId === "string"
+    );
+  }
+  if (evt.event === "spawn_dispatched" || evt.event === "spawn_refused") {
+    return (
+      taskIsString &&
+      typeof asRecord.provider === "string" &&
+      typeof asRecord.arity === "number" &&
+      Number.isInteger(asRecord.arity) &&
+      asRecord.arity >= 1 &&
+      (evt.event === "spawn_dispatched" || (typeof asRecord.rule === "string" && typeof asRecord.reason === "string"))
     );
   }
   const attempt = asRecord.attempt;

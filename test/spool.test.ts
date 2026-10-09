@@ -204,3 +204,62 @@ test("handleSpoolRequest routes asks to the choke handler and refuses loudly wit
     rule: "policy:S1-git-vocabulary",
   });
 });
+
+test("parseSpoolRequest accepts the spawn shape and nothing around it", () => {
+  assert.deepEqual(parseSpoolRequest({ id: "r1", kind: "spawn", task: "T1", provider: "claude/opus-4-8", arity: 2 }), {
+    id: "r1",
+    kind: "spawn",
+    task: "T1",
+    provider: "claude/opus-4-8",
+    arity: 2,
+  });
+  for (const bad of [
+    { id: "r1", kind: "spawn", task: "T1", provider: "claude" },
+    { id: "r1", kind: "spawn", task: "T1", provider: "claude", arity: "2" },
+    { id: "r1", kind: "spawn", task: "T1", provider: "claude", arity: 0 },
+    { id: "r1", kind: "spawn", task: "T1", provider: "claude", arity: 1.5 },
+    { id: "r1", kind: "spawn", task: "T1", arity: 1 },
+    { kind: "spawn", task: "T1", provider: "claude", arity: 1 },
+  ]) {
+    assert.equal(parseSpoolRequest(bad), undefined, `${JSON.stringify(bad)} must be rejected`);
+  }
+});
+
+test("handleSpoolRequest answers a spawn either way — dispatched rides ok, refusals ride the code and both leave one line", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const ws = join(dir, "ws");
+  const other = join(dir, "other");
+  for (const w of [ws, other]) {
+    mkdirSync(join(w, "src"), { recursive: true });
+    writeFileSync(join(w, "src", "x.ts"), "x\n");
+    gitCommitAll(w);
+  }
+  const factory = createFactory({ stateDir: join(dir, "state") });
+  factory.setContract({ task: "RUN-1", workspace: ws, gate: "true", artifact: "src/x.ts", scope: ["src"] });
+  factory.setContract({ task: "RUN-2", workspace: other, gate: "true", artifact: "src/x.ts" });
+
+  const dispatched = await handleSpoolRequest(factory, { id: "r1", kind: "spawn", task: "RUN-1", provider: "claude", arity: 2 });
+  assert.equal(dispatched.ok, true);
+  if (dispatched.ok) assert.match(dispatched.summary, /spawn dispatched for RUN-1 under claude/);
+
+  // Scope-mandatory: RUN-2 has no scope and the invocation carries two tasks.
+  const refused = await handleSpoolRequest(factory, { id: "r2", kind: "spawn", task: "RUN-2", provider: "claude", arity: 2 });
+  assert.equal(refused.ok, false);
+  if (!refused.ok) {
+    assert.equal(refused.code, "spawn-scope-mandatory");
+    assert.match(refused.message, /no scope/);
+  }
+
+  // Unknown task: refused with its line too — the plugin never dispatches blind.
+  const ghost = await handleSpoolRequest(factory, { id: "r3", kind: "spawn", task: "GHOST", provider: "claude", arity: 1 });
+  assert.equal(ghost.ok, false);
+  if (!ghost.ok) assert.equal(ghost.code, "unknown-task");
+
+  const spawnLines = factory.ledger.events.filter((e) => e.event === "spawn_dispatched" || e.event === "spawn_refused");
+  assert.deepEqual(
+    spawnLines.map((e) => `${e.event}:${e.task}`),
+    ["spawn_dispatched:RUN-1", "spawn_refused:RUN-2", "spawn_refused:GHOST"],
+    "one ledger line per spawn request, either way",
+  );
+});

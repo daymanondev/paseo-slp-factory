@@ -15,14 +15,20 @@
  * the work before any Claim, and a git block to any moment — so they carry
  * no `attempt`, and `git_blocked` may carry no `task` at all (the shim
  * refuses no matter who runs it; the ledger records what it can bind).
+ * The spawn events (`spawn_dispatched` / `spawn_refused`, v0.0.5) are the
+ * driver's arrival in the ledger: the plugin records one line per spawn
+ * request — allowed or refused — before any agent exists, so they too carry
+ * no `attempt` (ADR 0004's amendment: the driver never writes, the plugin
+ * validates and records).
  */
 
 export type Verdict = "red" | "green";
 
 /**
  * The whole event vocabulary — single source for types and validation. The
- * first seven are the attempt-scoped loop in ledger order; the last three are
- * the v0.0.4 choke vocabulary, appended after it.
+ * first seven are the attempt-scoped loop in ledger order; the choke
+ * vocabulary (v0.0.4) and the spawn vocabulary (v0.0.5) follow, appended
+ * after their host loops.
  */
 export const EVENT_NAMES = [
   "contract_set",
@@ -35,6 +41,8 @@ export const EVENT_NAMES = [
   "permit_allowed",
   "permit_denied",
   "git_blocked",
+  "spawn_dispatched",
+  "spawn_refused",
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];
@@ -199,6 +207,43 @@ export interface GitBlocked {
   blockId: string;
 }
 
+/**
+ * The plugin let a driver's spawn request through (v0.0.5, ADR 0004
+ * amendment): the task's Contract checked out against the spawn rules —
+ * known, unaccepted, scoped when the invocation runs parallel, workspace
+ * clear of other live Contracts — and the driver may now create the agent.
+ * The agent id is deliberately absent: the plugin writes this line before
+ * the agent exists (the driver's RPC create comes after the ok).
+ */
+export interface SpawnDispatched {
+  seq: number;
+  ts: Timestamp;
+  event: "spawn_dispatched";
+  task: string;
+  /** The `provider[/model]` string the driver asked to run the task under. */
+  provider: string;
+  /** How many tasks the spawning invocation carried — the run's parallel width. */
+  arity: number;
+}
+
+/**
+ * The plugin refused a driver's spawn request — one line naming the rule
+ * that fired, so a refused spawn is a recorded fact, not a CLI complaint.
+ * No agent exists for this line; the driver reports it and moves on.
+ */
+export interface SpawnRefused {
+  seq: number;
+  ts: Timestamp;
+  event: "spawn_refused";
+  task: string;
+  provider: string;
+  arity: number;
+  /** Which spawn validation fired (e.g. `spawn:scope-mandatory`). */
+  rule: string;
+  /** One line saying what the rule caught. */
+  reason: string;
+}
+
 export type LedgerEvent =
   | ContractSet
   | ClaimReported
@@ -209,7 +254,9 @@ export type LedgerEvent =
   | AttemptAccepted
   | PermitAllowed
   | PermitDenied
-  | GitBlocked;
+  | GitBlocked
+  | SpawnDispatched
+  | SpawnRefused;
 
 /** What callers hand to Ledger.append — same shape, `seq` and `ts` not yet assigned. */
 export type PendingEvent =
@@ -222,4 +269,6 @@ export type PendingEvent =
   | Omit<AttemptAccepted, "seq" | "ts">
   | Omit<PermitAllowed, "seq" | "ts">
   | Omit<PermitDenied, "seq" | "ts">
-  | Omit<GitBlocked, "seq" | "ts">;
+  | Omit<GitBlocked, "seq" | "ts">
+  | Omit<SpawnDispatched, "seq" | "ts">
+  | Omit<SpawnRefused, "seq" | "ts">;

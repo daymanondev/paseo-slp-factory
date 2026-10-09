@@ -341,13 +341,17 @@ test("two tasks share one ledger with independent seq and reports", async (t) =>
   const dir = makeTempDir();
   disposeDir(t, dir);
   const { workspace, artifact, sha } = makeWorkspace(dir);
+  const ws2 = join(dir, "ws2");
+  mkdirSync(join(ws2, "src"), { recursive: true });
+  writeFileSync(join(ws2, artifact), "export function pad() {}\n");
+  const sha2 = gitCommitAll(ws2);
   const stateDir = join(dir, "factory");
   const factory = createFactory({ stateDir });
 
   factory.setContract({ task: "A1", workspace, gate: "true", artifact });
-  factory.setContract({ task: "A2", workspace, gate: "exit 1", artifact });
+  factory.setContract({ task: "A2", workspace: ws2, gate: "exit 1", artifact });
   const first = await factory.claim({ task: "A1", sha });
-  const second = await factory.claim({ task: "A2", sha });
+  const second = await factory.claim({ task: "A2", sha: sha2 });
 
   assert.equal(first.verdict, "green");
   assert.equal(second.verdict, "red");
@@ -474,7 +478,7 @@ test("opening the ledger closes an attempt interrupted before the gate even star
   assert.match(gate?.note ?? "", /interrupted — the factory restarted before the Gate started/);
 });
 
-test("liveContractFor binds a cwd to a live contract — exact, nested, retired, and latest-wins", (t) => {
+test("liveContractFor binds a cwd to a live contract — exact, nested, retired by acceptance", (t) => {
   const dir = makeTempDir();
   disposeDir(t, dir);
   const wsA = join(dir, "wsA");
@@ -486,17 +490,180 @@ test("liveContractFor binds a cwd to a live contract — exact, nested, retired,
   }
   const factory = createFactory({ stateDir: join(dir, "state") });
   factory.setContract({ task: "A", workspace: wsA, gate: "true", artifact: "src/x.ts" });
-  factory.setContract({ task: "A2", workspace: wsA, gate: "true", artifact: "src/x.ts" });
   factory.setContract({ task: "B", workspace: wsB, gate: "true", artifact: "src/x.ts" });
 
-  assert.equal(factory.liveContractFor(wsA)?.task, "A2", "two live contracts on one tree — the latest in ledger order wins");
-  assert.equal(factory.liveContractFor(join(wsA, "src"))?.task, "A2", "a cwd inside the workspace is still that workspace's agent");
+  assert.equal(factory.liveContractFor(wsA)?.task, "A");
+  assert.equal(factory.liveContractFor(join(wsA, "src"))?.task, "A", "a cwd inside the workspace is still that workspace's agent");
   assert.equal(factory.liveContractFor(wsB)?.task, "B");
   assert.equal(factory.liveContractFor(join(dir, "wsA-evil")), undefined, "a sibling prefix is not inside — /wsA-evil must not match /wsA");
 
-  // Acceptance retires: once A2 is accepted, the tree falls back to A — still live.
-  factory.ledger.append({ event: "attempt_accepted", task: "A2", attempt: 1 });
-  assert.equal(factory.liveContractFor(wsA)?.task, "A");
+  // Acceptance retires: once A is accepted, its tree binds no live contract.
   factory.ledger.append({ event: "attempt_accepted", task: "A", attempt: 1 });
-  assert.equal(factory.liveContractFor(wsA), undefined, "accepted all the way down — no live contract, no choke");
+  assert.equal(factory.liveContractFor(wsA), undefined, "accepted — no live contract, no choke");
+  assert.equal(factory.liveContractFor(wsB)?.task, "B", "acceptance is per task, not global");
+});
+
+test("setContract refuses a workspace overlapping another live contract — equal, nested, containing (H1/H2)", (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const wsA = join(dir, "wsA");
+  const wsDeep = join(wsA, "deep");
+  const wsB = join(dir, "wsB");
+  for (const ws of [wsA, wsDeep, wsB]) {
+    mkdirSync(join(ws, "src"), { recursive: true });
+    writeFileSync(join(ws, "src", "x.ts"), "x\n");
+    gitCommitAll(ws);
+  }
+  gitCommitAll(dir); // the parent tree of them all — for the "contains" arm
+  const factory = createFactory({ stateDir: join(dir, "state") });
+  factory.setContract({ task: "A", workspace: wsA, gate: "true", artifact: "src/x.ts" });
+
+  // Same tree, different task — equal.
+  assert.throws(
+    () => factory.setContract({ task: "SAME", workspace: wsA, gate: "true", artifact: "src/x.ts" }),
+    (err: unknown) => err instanceof FactoryError && err.code === "workspace-conflict" && /is the same tree as.*task A/.test(err.message),
+  );
+  // A contract inside A's tree — nests.
+  assert.throws(
+    () => factory.setContract({ task: "NEST", workspace: wsDeep, gate: "true", artifact: "src/x.ts" }),
+    (err: unknown) => err instanceof FactoryError && err.code === "workspace-conflict" && /sits inside/.test(err.message),
+  );
+  // A contract on the parent tree — contains A.
+  assert.throws(
+    () => factory.setContract({ task: "WIDE", workspace: dir, gate: "true", artifact: "wsA/src/x.ts" }),
+    (err: unknown) => err instanceof FactoryError && err.code === "workspace-conflict" && /contains/.test(err.message),
+  );
+  // A trailing slash on the same tree is still the same tree.
+  assert.throws(
+    () => factory.setContract({ task: "SLASH", workspace: `${wsA}/`, gate: "true", artifact: "src/x.ts" }),
+    factoryErrorCode("workspace-conflict"),
+  );
+  // Every refusal left the ledger untouched.
+  assert.deepEqual(
+    factory.ledger.events.map((e) => `${e.event}:${"task" in e ? e.task : ""}`),
+    ["contract_set:A"],
+  );
+
+  // Acceptance retires the tree: A accepted, the same workspace contracts again.
+  factory.ledger.append({ event: "attempt_accepted", task: "A", attempt: 1 });
+  const next = factory.setContract({ task: "REUSE", workspace: wsA, gate: "true", artifact: "src/x.ts" });
+  assert.equal(next.event, "contract_set");
+
+  // Sibling trees never conflicted in the first place.
+  const sibling = createFactory({ stateDir: join(dir, "state2") });
+  sibling.setContract({ task: "A", workspace: wsA, gate: "true", artifact: "src/x.ts" });
+  assert.equal(sibling.setContract({ task: "B", workspace: wsB, gate: "true", artifact: "src/x.ts" }).event, "contract_set");
+});
+
+test("claim refuses on an accepted task — the H6 rider closes the loop's far end", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const { workspace, artifact, sha } = makeWorkspace(dir);
+  const factory = createFactory({ stateDir: join(dir, "state") });
+  factory.setContract({ task: "CLOSED", workspace, gate: "true", artifact });
+  await factory.claim({ task: "CLOSED", sha });
+  factory.accept({ task: "CLOSED", attempt: 1 });
+  const eventsBefore = factory.ledger.events.length;
+
+  await assert.rejects(factory.claim({ task: "CLOSED", sha }), factoryErrorCode("already-accepted"));
+  assert.equal(factory.ledger.events.length, eventsBefore, "the refused claim appends nothing");
+});
+
+test("requestSpawn dispatches a contracted task and appends exactly one spawn_dispatched line", (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const { workspace, artifact } = makeWorkspace(dir);
+  const factory = createFactory({ stateDir: join(dir, "state") });
+  factory.setContract({ task: "SPAWN-1", workspace, gate: "true", artifact, scope: ["src"] });
+
+  const decision = factory.requestSpawn({ task: "SPAWN-1", provider: "claude/opus-4-8", arity: 2 });
+
+  assert.equal(decision.outcome, "dispatched");
+  const { ts, ...rest } = decision.event;
+  assert.deepEqual(rest, { seq: 2, event: "spawn_dispatched", task: "SPAWN-1", provider: "claude/opus-4-8", arity: 2 });
+  assert.deepEqual(factory.ledger.eventsFor("SPAWN-1").map((e) => e.event), ["contract_set", "spawn_dispatched"]);
+});
+
+test("requestSpawn refuses and records one spawn_refused line per rule", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const { workspace, artifact, sha } = makeWorkspace(dir);
+  const elsewhere = join(dir, "elsewhere");
+  mkdirSync(elsewhere, { recursive: true });
+  writeFileSync(join(elsewhere, "x"), "x\n");
+  gitCommitAll(elsewhere);
+  const factory = createFactory({ stateDir: join(dir, "state") });
+  factory.setContract({ task: "KNOWN", workspace, gate: "true", artifact, scope: ["src"] });
+  factory.setContract({ task: "BARE", workspace: elsewhere, gate: "true", artifact: "x" });
+
+  // Unknown task — the refusal still gets its line, named for the ask.
+  const unknown = factory.requestSpawn({ task: "GHOST", provider: "claude", arity: 1 });
+  assert.equal(unknown.outcome, "refused");
+  if (unknown.outcome === "refused") {
+    assert.equal(unknown.code, "unknown-task");
+    assert.equal(unknown.event.rule, "spawn:unknown-task");
+    assert.match(unknown.event.reason, /no contract set for task GHOST/);
+  }
+
+  // Malformed task id — refused, not thrown.
+  const invalid = factory.requestSpawn({ task: "no spaces", provider: "claude", arity: 1 });
+  assert.equal(invalid.outcome, "refused");
+  if (invalid.outcome === "refused") assert.equal(invalid.event.rule, "spawn:invalid-task");
+
+  // Scope-mandatory fires at arity ≥ 2 only — n=1 dispatches the bare contract.
+  const bare1 = factory.requestSpawn({ task: "BARE", provider: "claude", arity: 1 });
+  assert.equal(bare1.outcome, "dispatched", "a lone run may carry an unscoped contract (v0.0.1 behavior)");
+  const bare2 = factory.requestSpawn({ task: "BARE", provider: "claude", arity: 2 });
+  assert.equal(bare2.outcome, "refused");
+  if (bare2.outcome === "refused") {
+    assert.equal(bare2.code, "spawn-scope-mandatory");
+    assert.match(bare2.event.reason, /must be scoped to run in parallel/);
+  }
+
+  // Accepted task — closed to spawns.
+  await factory.claim({ task: "KNOWN", sha });
+  factory.accept({ task: "KNOWN", attempt: 1 });
+  const accepted = factory.requestSpawn({ task: "KNOWN", provider: "claude", arity: 1 });
+  assert.equal(accepted.outcome, "refused");
+  if (accepted.outcome === "refused") assert.equal(accepted.event.rule, "spawn:accepted-task");
+
+  const lines = factory.ledger.events.filter((e) => e.event === "spawn_refused");
+  assert.equal(lines.length, 4, "every refusal is exactly one line");
+  assert.ok(lines.every((e) => e.event === "spawn_refused" && typeof e.provider === "string" && e.arity >= 1));
+});
+
+test("requestSpawn refuses a workspace overlapping another live contract — the driver's spawn-time arm", (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const wsA = join(dir, "wsA");
+  const wsB = join(dir, "wsB");
+  for (const ws of [wsA, wsB]) {
+    mkdirSync(join(ws, "src"), { recursive: true });
+    writeFileSync(join(ws, "src", "x.ts"), "x\n");
+    gitCommitAll(ws);
+  }
+  // Contract both before either is live-blocked: the overlap was contracted
+  // via direct ledger appends (the setContract guard would refuse it), so the
+  // spawn-time scan is the last line of defense — belt and braces by design.
+  const factory = createFactory({ stateDir: join(dir, "state") });
+  factory.setContract({ task: "A", workspace: wsA, gate: "true", artifact: "src/x.ts", scope: ["src"] });
+  const bContract = factory.ledger.append({ event: "contract_set", task: "B", workspace: join(wsA, "sub"), gate: "true", artifact: "src/x.ts", scope: ["src"] });
+  assert.ok(bContract.event === "contract_set");
+
+  const refused = factory.requestSpawn({ task: "B", provider: "claude", arity: 2 });
+  assert.equal(refused.outcome, "refused");
+  if (refused.outcome === "refused") {
+    assert.equal(refused.code, "workspace-conflict");
+    assert.equal(refused.event.rule, "spawn:workspace-conflict");
+    assert.match(refused.event.reason, /sits inside the live contract of task A/);
+  }
+  // The scan is symmetric: A's tree now contains B's live contract, so A
+  // refuses too — an overlapping live set is unsafe for both sides, whoever
+  // contracted it.
+  const alsoRefused = factory.requestSpawn({ task: "A", provider: "claude", arity: 2 });
+  assert.equal(alsoRefused.outcome, "refused");
+  if (alsoRefused.outcome === "refused") {
+    assert.equal(alsoRefused.code, "workspace-conflict");
+    assert.match(alsoRefused.event.reason, /contains the live contract of task B/);
+  }
 });

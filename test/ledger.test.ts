@@ -165,3 +165,33 @@ test("eventsFor filters by task across event kinds", (t) => {
 
   assert.deepEqual(ledger.eventsFor("T1").map((e) => e.event), ["contract_set", "claim_reported"]);
 });
+
+test("spawn events need their shape at open — provider, arity, and the refusal's rule and reason", (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const good = (event: string, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ seq: 1, ts: "2026-10-09T10:00:00.000Z", event, task: "T1", provider: "claude", arity: 1, ...extra });
+
+  for (const [name, line] of [
+    ["a dispatch without arity", good("spawn_dispatched", { arity: undefined })],
+    ["a dispatch with a fractional arity", good("spawn_dispatched", { arity: 1.5 })],
+    ["a dispatch without provider", good("spawn_dispatched", { provider: undefined })],
+    ["a refusal without a reason", good("spawn_refused", { rule: "spawn:unknown-task" })],
+    ["a refusal without a rule", good("spawn_refused", { reason: "because" })],
+    ["a spawn event without a task", JSON.stringify({ seq: 1, ts: "2026-10-09T10:00:00.000Z", event: "spawn_dispatched", provider: "claude", arity: 1 })],
+  ] as [string, string][]) {
+    const each = makeTempDir();
+    disposeDir(t, each);
+    const path = join(each, "ledger.jsonl");
+    writeFileSync(path, `${line}\n`);
+    assert.throws(() => Ledger.open(path), factoryErrorCode("corrupted-ledger"), name);
+  }
+
+  // Well-shaped lines of both kinds open cleanly — the vocabulary grew, the law held.
+  const ok = join(dir, "ledger.jsonl");
+  writeFileSync(
+    ok,
+    `${good("spawn_dispatched")}\n${good("spawn_refused", { seq: 2, arity: 2, rule: "spawn:scope-mandatory", reason: "no scope" })}\n`,
+  );
+  assert.equal(Ledger.open(ok).events.length, 2);
+});
