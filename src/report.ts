@@ -1,4 +1,5 @@
 import { FactoryError } from "./errors.ts";
+import { WATCH_CALLOUT_THRESHOLD } from "./constants.ts";
 import type {
   ClaimReported,
   ContractSet,
@@ -8,17 +9,19 @@ import type {
   LedgerEvent,
   PermitDenied,
   PermitAllowed,
+  WatchWritten,
 } from "./events.ts";
 
 /**
  * Renders `report-<task>-<n>.md` from ledger events — every content line traces
  * to one: contract line ← contract_set, claim ← claim_reported, attested commit ←
  * gate_finished.sha, verdict ← the gate verdict, the eye's line ←
- * fresh_eyes_written. Timestamps come from events, not render time (ADR 0003);
- * the header carries the moment the Verdict was established. The report states
- * evidence and stops there: green is not acceptance (ADR 0002), so no line
- * concludes "DONE" — and the eye's line, when present, sits between the
- * Verdict and the closing language as evidence, never as a second verdict.
+ * fresh_eyes_written, the watch's line ← watch_written. Timestamps come from
+ * events, not render time (ADR 0003); the header carries the moment the Verdict
+ * was established. The report states evidence and stops there: green is not
+ * acceptance (ADR 0002), so no line concludes "DONE" — and the eye's and
+ * watch's lines, when present, sit between the Verdict and the closing
+ * language as evidence, never as a second verdict.
  */
 export function renderReport(task: string, attempt: number, events: readonly LedgerEvent[]): string {
   const mine = events.filter((e) => e.task === task && (e.event === "contract_set" || ("attempt" in e && e.attempt === attempt)));
@@ -26,6 +29,7 @@ export function renderReport(task: string, attempt: number, events: readonly Led
   const claim = mine.findLast((e): e is ClaimReported => e.event === "claim_reported");
   const gate = mine.findLast((e): e is GateFinished => e.event === "gate_finished");
   const eye = mine.findLast((e): e is FreshEyesWritten => e.event === "fresh_eyes_written");
+  const watch = mine.findLast((e): e is WatchWritten => e.event === "watch_written");
 
   if (!contract || !claim || !gate) {
     const missing = [
@@ -57,6 +61,7 @@ export function renderReport(task: string, attempt: number, events: readonly Led
     ...(gate.sha === undefined ? [] : [`- Attested commit: \`${gate.sha}\``]),
     `- Verdict: ${gate.verdict.toUpperCase()} — ${gate.note}`,
     ...(eyeLine(eye)),
+    ...(watchLine(watch)),
     gate.verdict === "green"
       ? "- Evidence, not acceptance: gate exited 0 at the attested commit, artifact present. Only the Owner accepts an Attempt."
       : "- Contract not met — send the gate note back to the agent, with the reminder: do not make the tests green yourself.",
@@ -70,6 +75,28 @@ function eyeLine(eye: FreshEyesWritten | undefined): string[] {
   const verdict = eye.outcome === "concern" ? "CONCERN" : eye.outcome === "clear" ? "CLEAR" : "FAILED";
   const suffix = eye.finding === "" ? "" : `: ${eye.finding}`;
   return [`- Fresh eyes (\`${eye.model}\`) — ${verdict}${suffix}`];
+}
+
+/**
+ * The watch's one line (ticket 03 §7): the model's dated snapshot, the answers
+ * sorted descending, and the ≥0.5 callout — display-only, the threshold never
+ * branches anything (record-only law). A `failed` pass names its error instead
+ * of guessing from partial answers.
+ */
+function watchLine(watch: WatchWritten | undefined): string[] {
+  if (watch === undefined) return [];
+  if (watch.outcome === "failed") {
+    return [`- Watch — FAILED: ${watch.error ?? "no reason recorded"}`];
+  }
+  const answers = Object.entries(watch.answers ?? {})
+    .filter((entry): entry is [string, number] => typeof entry[1] === "number")
+    .sort((a, b) => b[1] - a[1]);
+  const rendered = answers.map(([name, probability]) => `${name} ${probability.toFixed(2)}`).join(", ");
+  const flagged = answers.filter(([, probability]) => probability >= WATCH_CALLOUT_THRESHOLD).map(([name]) => name);
+  // The dated snapshot renders short (`jev-1.13-20260917`) — the provider
+  // prefix is ledger bookkeeping, not reading.
+  const model = watch.model.includes("/") ? watch.model.slice(watch.model.indexOf("/") + 1) : watch.model;
+  return [`- Watch (${model}) — ${answers.length} answers: ${rendered} — ≥${WATCH_CALLOUT_THRESHOLD}: ${flagged.join(", ") || "none"}`];
 }
 
 /**

@@ -39,6 +39,11 @@ commands:
              [--fresh-eyes]          mark the fresh-eyes pass ON for this task
                                      (needs <stateDir>/eye.json; the pass is
                                      advisory and runs only on green verdicts)
+             [--watch]               mark the watch pass ON for this task
+                                     (needs <stateDir>/watch.json; record-only,
+                                     one watch_written line after EVERY verdict)
+             [--description <text>]  the task's assignment in the Owner's words —
+                                     the driver's brief carries it (v0.0.6)
 
   accept     Accept one green attempt of a task (the Owner's act)
              accept <task> --attempt <n>
@@ -50,7 +55,8 @@ commands:
              arity ≥ 2 requires scoped contracts. The driver creates the
              branch named after the task, submits one spawn request per task
              through the spool, and exits 0 only when every task ended green
-             with zero refusals.
+             with zero refusals. Each agent's brief carries its contract's
+             --description, when one was set.
 
   status     Print one line per task from the ledger — attempts, last verdict,
              attested sha (short), accepted, last fresh-eyes outcome, and the
@@ -67,7 +73,7 @@ const DEFAULT_WAIT_SECS = 60;
 // src/events.ts because the CLIs import no src/ code (ADR 0004). Kept on one
 // line so test/status.test.ts can guard this copy against drift. Kept in sync
 // with the writer by the same suite, the way test/cli.test.ts guards the spool.
-const EVENT_NAMES = ["contract_set", "claim_reported", "gate_started", "gate_finished", "fresh_eyes_written", "report_written", "attempt_accepted", "permit_allowed", "permit_denied", "git_blocked", "spawn_dispatched", "spawn_refused"];
+const EVENT_NAMES = ["contract_set", "claim_reported", "gate_started", "gate_finished", "fresh_eyes_written", "watch_written", "report_written", "attempt_accepted", "permit_allowed", "permit_denied", "git_blocked", "spawn_dispatched", "spawn_refused"];
 // Events without an Attempt number: contract_set owns the Task, the choke
 // events (v0.0.4) belong to the Task's whole life, git_blocked may carry no
 // task at all (the shim refuses no matter who runs it), and the spawn events
@@ -159,6 +165,8 @@ if (command === "contract") {
     artifact: { type: "string" },
     scope: { type: "string" },
     "fresh-eyes": { type: "boolean", default: false },
+    watch: { type: "boolean", default: false },
+    description: { type: "string" },
     "wait-secs": { type: "string" },
   });
   const v = parsed.values;
@@ -166,6 +174,9 @@ if (command === "contract") {
   if (typeof v.workspace !== "string") fail("contract: --workspace is required");
   if (typeof v.gate !== "string") fail("contract: --gate is required");
   if (typeof v.artifact !== "string") fail("contract: --artifact is required");
+  if (typeof v.description === "string" && v.description.trim() === "") {
+    fail("contract: --description must be a non-empty text — omit it when the task has no assignment text");
+  }
   if (parsed.positionals.length > 0) fail(`contract: unexpected positional "${parsed.positionals[0]}"`);
 
   const request = {
@@ -179,6 +190,8 @@ if (command === "contract") {
       ? {}
       : { scope: v.scope.split(",").map((s) => s.trim()).filter((s) => s !== "") }),
     ...(v["fresh-eyes"] ? { freshEyes: true } : {}),
+    ...(v.watch ? { watch: true } : {}),
+    ...(v.description === undefined ? {} : { description: v.description }),
   };
   const reply = await roundTrip(request, waitSeconds(parsed));
   console.log(`factory: ${reply.summary}`);

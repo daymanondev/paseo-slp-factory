@@ -70,7 +70,7 @@ export interface FakeEyeRequest {
   body: unknown;
 }
 
-export type FakeEyeResponse = { status: number; payload: unknown } | { hang: true };
+export type FakeEyeResponse = { status: number; payload: unknown; headers?: Record<string, string> } | { hang: true };
 
 export interface FakeEye {
   url: string;
@@ -103,6 +103,7 @@ export async function startFakeEye(t: TestContext, respond: () => FakeEyeRespons
       if ("hang" in answer) return;
       res.statusCode = answer.status;
       res.setHeader("content-type", "application/json");
+      for (const [name, value] of Object.entries(answer.headers ?? {})) res.setHeader(name, value);
       res.end(JSON.stringify(answer.payload));
     });
   });
@@ -124,4 +125,30 @@ export function writeEyeConfig(stateDir: string, baseUrl: string, model = "fake-
 /** The standard Anthropic-messages text answer. */
 export function eyeAnswer(text: string): unknown {
   return { content: [{ type: "text", text }] };
+}
+
+/** Writes the watch's config (v0.0.6 shape) — one key, nothing else. */
+export function writeWatchConfig(stateDir: string, apiKey = "test-watch-key"): void {
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "watch.json"), `${JSON.stringify({ apiKey }, null, 2)}\n`);
+}
+
+/** The eight watch answers, all present — the happy-path Decisions response. */
+export function jevAnswer(answers: Record<string, number>, usage?: { input_tokens?: number; cost?: number }): unknown {
+  return {
+    id: "gen-dec-test",
+    model: "typesafe/jev-1.13-20260917",
+    answers: Object.fromEntries(Object.entries(answers).map(([name, noul]) => [name, { type: "noul", noul }])),
+    usage: { input_tokens: 476, output_tokens: 70, ...(usage ?? {}) },
+  };
+}
+
+/**
+ * A fetch stand-in that reroutes the watch's pinned OpenRouter URL to the
+ * loopback fake — the endpoint is pinned in code by law, so tests redirect it
+ * here instead of configuring it. Any other URL passes through untouched.
+ */
+export function fetchViaFake(fake: FakeEye): typeof fetch {
+  return ((input: string | URL | Request, init?: RequestInit) =>
+    fetch(String(input).replace("https://openrouter.ai", fake.url), init)) as unknown as typeof fetch;
 }

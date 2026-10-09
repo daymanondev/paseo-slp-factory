@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createFactory } from "../plugin/server/core/factory.ts";
 import { startSpool } from "../plugin/server/spool.ts";
-import { copyFixture, disposeDir, eyeAnswer, gitCommitAll, gitCommitChanges, makeTempDir, repoRoot, startFakeEye, writeEyeConfig } from "./helpers.ts";
+import { copyFixture, disposeDir, eyeAnswer, gitCommitAll, gitCommitChanges, makeTempDir, repoRoot, startFakeEye, writeEyeConfig, writeWatchConfig } from "./helpers.ts";
 
 /**
  * The mechanical DoD of ticket 08 without a daemon: the real CLIs
@@ -239,4 +239,60 @@ test("factory run refuses bad usage before touching the spool or the daemon", as
 
   const stateDir = join(home, "plugin-state", "paseo-factory");
   assert.ok(!existsSync(join(stateDir, "spool", "requests")), "no request was submitted for refused usage");
+});
+
+test("the v0.0.6 contract flags round-trip: --watch marks the pass, --description rides the line", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const workspace = join(dir, "workspace");
+  copyFixture("sample-workspace", workspace);
+  gitCommitAll(workspace);
+  const home = join(dir, "paseo-home");
+  const stateDir = join(home, "plugin-state", "paseo-factory");
+  writeWatchConfig(stateDir); // --watch fails fast without it
+
+  const factory = createFactory({ stateDir });
+  const spool = startSpool(stateDir, factory);
+  t.after(() => spool.stop());
+  const ownerEnv = { PASEO_HOME: home };
+
+  const contract = await run(
+    ownerCli,
+    [
+      "contract", "--task", "RIDER1", "--workspace", workspace, "--gate", "true", "--artifact", "src/format.ts",
+      "--watch", "--description", "Tighten the pad helper's truncation edge case.",
+    ],
+    ownerEnv,
+  );
+  assert.equal(contract.status, 0, contract.stderr);
+  assert.match(contract.stdout, /contract set for RIDER1/);
+  assert.match(contract.stdout, /watch ON/);
+
+  const set = factory.ledger.eventsFor("RIDER1")[0];
+  assert.equal(set.event === "contract_set" ? set.watch : undefined, true, "the mark is Contract data");
+  assert.equal(set.event === "contract_set" ? set.description : undefined, "Tighten the pad helper's truncation edge case.");
+
+  // --watch without a usable watch.json is refused loudly, before any line.
+  const home2 = join(dir, "paseo-home2");
+  const stateDir2 = join(home2, "plugin-state", "paseo-factory");
+  const factory2 = createFactory({ stateDir: stateDir2 });
+  const spool2 = startSpool(stateDir2, factory2);
+  t.after(() => spool2.stop());
+  const refused = await run(
+    ownerCli,
+    ["contract", "--task", "RIDER2", "--workspace", workspace, "--gate", "true", "--artifact", "src/format.ts", "--watch"],
+    { PASEO_HOME: home2 },
+  );
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /watch\.json/);
+  assert.deepEqual([...factory2.ledger.events], [], "no line for the refused contract");
+
+  // An empty --description is a usage error, not a silent blank.
+  const blank = await run(
+    ownerCli,
+    ["contract", "--task", "RIDER3", "--workspace", workspace, "--gate", "true", "--artifact", "src/format.ts", "--description", "  "],
+    { PASEO_HOME: home },
+  );
+  assert.equal(blank.status, 2);
+  assert.match(blank.stderr, /--description must be a non-empty text/);
 });

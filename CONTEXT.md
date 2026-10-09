@@ -64,6 +64,14 @@ _Avoid_: done, finished, complete, passed
 A second judgment of a green Attempt by a different model that took no part in writing it — one direct-API read of the Contract, the diff and the gate output, appending one advisory ledger line (`fresh_eyes_written`). Evidence for the Owner, never acceptance; off unless the Contract marks it on. Added in v0.0.2.
 _Avoid_: mắt soi (outside research notes), code review, self-review
 
+**Watch**:
+The record-only post-verdict pass that asks the eight Watch questions about one Attempt — a decision model reading the run timeline, the Contract, the diff and the gate output in one call — and appends exactly one ledger line (`watch_written`). A passenger, never a judge: no notification, no escalation, and Verdicts and driver exits are unchanged by its answers. Off unless the Contract marks it on. Added in v0.0.6.
+_Avoid_: watcher, monitor, alarm, and "Jev" as a mechanism name (Jev names the model, never the factory part)
+
+**Watch question**:
+One of the eight fixed yes/no questions the Watch asks (destructive-writes, test-weakened, fake-done, unverified-claims, stuck-loop, scope-creep, self-accept, secret-leak) — each with fixed wording, true/false criteria and a prior, answered as a calibrated yes-probability, never prose. Four are pre-answered by code where code already judges (the cascade's free tier); the model's take is recorded anyway. Added in v0.0.6.
+_Avoid_: check, heuristic, alert rule
+
 **Flaw battery**:
 A set of deliberately flawed, gate-green Tasks — plus one clean control — run through the real pipeline to measure whether the fresh-eyes review catches what the Gate cannot. The runner never judges outcomes and never accepts; comparing findings against planted ground truth is the operator's act. Added in v0.0.3.
 _Avoid_: test suite, eval harness, mutation suite
@@ -75,6 +83,10 @@ _Avoid_: case, scenario, fixture (that names the files)
 **Battery outcome**:
 The comparison words for one arm against ground truth: hit (CONCERN citing the planted flaw), miss (CLEAR on a flawed arm), noisy hit (CONCERN citing only non-planted nits), false positive (CONCERN on the clean control), failed (technical).
 _Avoid_: pass/fail (those are Verdict words)
+
+**Watch battery**:
+The instrument that measures the Watch: eight planted arms — one per Watch question — plus a clean control, run through the real pipeline on the trial daemon with the Watch on, outcomes asserted with the Battery outcome words against pre-registered ground truth (a flag means yes-probability ≥ 0.5 naming the planted evidence). The runner never judges and never accepts; comparison against ground truth is the operator's act at close-out. Added in v0.0.6.
+_Avoid_: eval suite, calibration set (that is the later tooling)
 
 ### Permissions
 

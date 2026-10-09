@@ -14,6 +14,27 @@ export { runGate } from "./gate.ts";
 export type { GateInput, GateResult } from "./gate.ts";
 export { eyeConfigPath, loadEyeConfig, runFreshEyesPass, tailWithMarker, parseEyeAnswer } from "./fresh-eyes.ts";
 export type { EyeConfig, EyeConfigResult, FreshEyesOutcome, FreshEyesPassInput, ParsedEyeAnswer } from "./fresh-eyes.ts";
+export {
+  SELF_ACCEPT_CODE_ANSWER,
+  WATCH_MODEL,
+  WATCH_QUESTIONS,
+  buildCodeAnswers,
+  loadWatchConfig,
+  renderTimelineTranscript,
+  runWatchPass,
+  watchConfigPath,
+} from "./watch.ts";
+export type {
+  CodeAnswersInput,
+  TimelineFetcher,
+  TimelineFetchResult,
+  WatchConfig,
+  WatchConfigResult,
+  WatchOutcome,
+  WatchPassInput,
+  WatchQuestion,
+  WatchTimelineEntry,
+} from "./watch.ts";
 export { renderReport } from "./report.ts";
 export { FactoryError } from "./errors.ts";
 export {
@@ -32,6 +53,14 @@ export {
   EYE_DIFF_MAX_CHARS,
   EYE_GATE_OUTPUT_MAX_CHARS,
   EYE_MAX_TOKENS,
+  WATCH_TOTAL_BUDGET_MS,
+  WATCH_TIMELINE_MAX_CHARS,
+  WATCH_DIFF_MAX_CHARS,
+  WATCH_GATE_OUTPUT_MAX_CHARS,
+  WATCH_PROMPT_TOKEN_GUARD,
+  WATCH_CHARS_PER_TOKEN,
+  WATCH_CALLOUT_THRESHOLD,
+  WATCH_COST_PER_MTOK,
 } from "./constants.ts";
 export type {
   Verdict,
@@ -44,6 +73,7 @@ export type {
   GateStarted,
   GateFinished,
   FreshEyesWritten,
+  WatchWritten,
   ReportWritten,
   AttemptAccepted,
   PermitAllowed,
