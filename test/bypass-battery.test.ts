@@ -83,7 +83,7 @@ test("dry-run: all four escape arms choke, the control stays clean, and nothing 
     { prefix: "ctl-normal-work", events: ["contract_set", "permit_allowed"] },
   ];
   for (const arm of arms) {
-    const task = factory.ledger.events.map((e) => e.task).find((id) => id?.startsWith(`${arm.prefix}-`));
+    const task = factory.ledger.events.flatMap((e) => ("task" in e ? [e.task] : [])).find((id) => id?.startsWith(`${arm.prefix}-`));
     assert.ok(task, `an arm task with prefix ${arm.prefix} ran`);
     const events = factory.ledger.eventsFor(task).map((e) => e.event);
     assert.deepEqual(events, arm.events, `${arm.prefix}: exactly the contract plus one choke line — nothing more`);

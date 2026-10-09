@@ -110,7 +110,7 @@ export class Ledger {
   }
 
   eventsFor(task: string): LedgerEvent[] {
-    return this.#events.filter((e) => e.task === task);
+    return this.#events.filter((e): boolean => "task" in e && e.task === task);
   }
 }
 
@@ -121,12 +121,23 @@ export class Ledger {
  * needs its command/rule/cwd/blockId and may lack a task entirely (the shim
  * refuses no matter who runs it, bindable or not). The v0.0.5 spawn events
  * carry none either — they precede any attempt — and need their task,
- * provider, arity, and (for a refusal) rule and reason.
+ * provider, arity, and (for a refusal) rule and reason. The v0.0.7
+ * `retro_written` carries neither task nor attempt — the factory-level
+ * event — and needs its model, outcome and duration.
  */
 function shapeIsValid(evt: LedgerEvent): boolean {
   const asRecord = evt as unknown as Record<string, unknown>;
   const taskIsString = typeof asRecord.task === "string";
   if (evt.event === "contract_set") return taskIsString;
+  if (evt.event === "retro_written") {
+    return (
+      typeof asRecord.model === "string" &&
+      (asRecord.outcome === "written" || asRecord.outcome === "failed") &&
+      typeof asRecord.durationMs === "number" &&
+      Number.isFinite(asRecord.durationMs) &&
+      asRecord.durationMs >= 0
+    );
+  }
   if (evt.event === "permit_allowed" || evt.event === "permit_denied") {
     return taskIsString && typeof asRecord.agent === "string" && (evt.event === "permit_allowed" || typeof asRecord.rule === "string");
   }

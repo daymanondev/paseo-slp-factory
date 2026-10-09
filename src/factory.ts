@@ -6,6 +6,8 @@ import { renderReport } from "./report.ts";
 import { loadEyeConfig, runFreshEyesPass } from "./fresh-eyes.ts";
 import { copilotAvailable, runWatchPass } from "./watch.ts";
 import type { CopilotRunner, TimelineFetcher } from "./watch.ts";
+import { buildRetroDigest, retroDay, runRetroPass, writtenRetroForDay } from "./retro.ts";
+import type { RetroOutcome } from "./retro.ts";
 import { changesOutsideScope, checkCleanAt, headCommitSync, resolveClaimedCommit } from "./workspace.ts";
 import { FactoryError } from "./errors.ts";
 import type { AttemptAccepted, ContractSet, GateFinished, GitBlocked, LedgerEvent, SpawnDispatched, SpawnRefused, Verdict } from "./events.ts";
@@ -34,6 +36,12 @@ export interface FactoryOptions {
   watchCopilotProbe?: () => boolean;
   /** Copilot CLI runner override (tests) — the model and flags stay pinned regardless. */
   watchCopilotRunner?: CopilotRunner;
+  /** Retro total budget override (ms), both tries together (tests). Defaults to RETRO_TOTAL_BUDGET_MS. */
+  retroBudgetMs?: number;
+  /** Retro's copilot availability probe override (tests) — the pass refuses before any ask when false. */
+  retroCopilotProbe?: () => boolean;
+  /** Retro's copilot CLI runner override (tests) — the model and flags stay pinned regardless. */
+  retroCopilotRunner?: CopilotRunner;
 }
 
 export interface ContractInput {
@@ -159,6 +167,17 @@ export interface Factory {
    * Undefined when no Contract was ever set for the task.
    */
   contractFor(task: string): ContractSet | undefined;
+  /**
+   * Runs the Retro (v0.0.7): builds the whole-ledger digest, prompts the
+   * pinned Copilot model, writes `retro-<date>.md`, appends one
+   * factory-level `retro_written` line (ADR 0004 one-writer law — the CLI
+   * only asked through the spool). Whole-ledger always; no arguments exist
+   * to pass. Refused retros (copilot CLI unusable, a same-day successful
+   * Retro already on the ledger) throw and write NO line — nothing changed,
+   * so nothing is recorded. Technical failures never throw: the pass's own
+   * `failed` outcome lands as a visible ledger line with its error, no file.
+   */
+  retro(): Promise<RetroOutcome>;
 }
 
 export function createFactory(options: FactoryOptions): Factory {
@@ -536,6 +555,49 @@ export function createFactory(options: FactoryOptions): Factory {
     contractFor(task) {
       return ledger.eventsFor(task).findLast((e): e is ContractSet => e.event === "contract_set");
     },
+
+    async retro() {
+      // Refusal 1 — the pass probes availability itself (ticket 03 item 5:
+      // `contract_set`'s pre-flight is untouched; the Retro refuses per
+      // item 3, workspace-conflict style: no ledger line).
+      const usable = options.retroCopilotProbe === undefined ? copilotAvailable() : options.retroCopilotProbe();
+      if (!usable) {
+        throw new FactoryError(
+          "retro-copilot-unusable",
+          "the retro needs the copilot CLI usable on PATH — install and auth it for the daemon user (the CLI carries the pass's auth, there is no key file)",
+        );
+      }
+      // Refusal 2 — one successful Retro per UTC day (the ledger's ts day,
+      // the file's day, the same day): a refused second run points at
+      // today's file and records nothing.
+      const today = retroDay(new Date());
+      const prior = writtenRetroForDay(ledger.events, today);
+      if (prior !== undefined) {
+        throw new FactoryError(
+          "retro-same-day",
+          `a retro already ran today — its ${prior.proposalCount ?? 0} proposals sit in ${prior.proposalsPath}; a failed retro leaves no line, so only a failed one may be re-run today`,
+        );
+      }
+      const corpus = buildRetroDigest(ledger.events, stateDir);
+      const outcome = await runRetroPass({
+        stateDir,
+        corpus,
+        ...(options.retroBudgetMs === undefined ? {} : { budgetMs: options.retroBudgetMs }),
+        ...(options.retroCopilotRunner === undefined ? {} : { copilotRunner: options.retroCopilotRunner }),
+      });
+      // The pass wrote the file before returning a `written` outcome; the
+      // line lands after it, by construction (ticket 03 item 3).
+      ledger.append({
+        event: "retro_written",
+        model: outcome.model,
+        outcome: outcome.outcome,
+        durationMs: outcome.durationMs,
+        ...(outcome.error === undefined ? {} : { error: outcome.error }),
+        ...(outcome.proposalsPath === undefined ? {} : { proposalsPath: outcome.proposalsPath }),
+        ...(outcome.proposalCount === undefined ? {} : { proposalCount: outcome.proposalCount }),
+      });
+      return outcome;
+    },
   };
 }
 
@@ -605,8 +667,8 @@ function normalized(path: string): string {
  * Contract marks fresh-eyes and the Verdict is green — the eye's one advisory
  * pass runs before the report, so the report is written once, already
  * containing the eye's line (ticket 03 §2). The watch (v0.0.6) follows the eye
- * on BOTH verdicts — the fake-done and stuck-loop battery arms are red by
- * construction — and is record-only: its line lands, nothing downstream reads
+ * on BOTH verdicts — the stuck-loop battery arm is red by construction — and
+ * is record-only: its line lands, nothing downstream reads
  * it, the Verdict and the accept flow are untouched.
  */
 async function finish(
@@ -735,7 +797,8 @@ function attemptIsOpen(history: readonly LedgerEvent[], attempt: number): boolea
  */
 function recoverInterruptedAttempts(ledger: Ledger, stateDir: string): { task: string; attempt: number }[] {
   const recovered: { task: string; attempt: number }[] = [];
-  const tasks = [...new Set(ledger.events.map((e) => e.task).filter((task): task is string => typeof task === "string"))];
+  // `retro_written` carries no task — only tasked events can need recovery.
+  const tasks = [...new Set(ledger.events.flatMap((e) => ("task" in e && typeof e.task === "string" ? [e.task] : [])))];
   for (const task of tasks) {
     const history = ledger.eventsFor(task);
     for (let attempt = 1; attempt <= maxAttempt(history); attempt++) {
