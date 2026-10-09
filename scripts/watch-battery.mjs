@@ -157,7 +157,9 @@ try {
     die(`${watchPath} has no usable "apiKey" string`);
   }
   const mode = statSync(watchPath).mode & 0o777;
-  if (mode !== 0o600) console.log(`warning: ${watchPath} is mode ${mode.toString(8)} — the runbook says 600`);
+  if (mode !== 0o600) {
+    die(`${watchPath} is mode ${mode.toString(8)} — the runbook law is 600 (chmod 600 it; this script never touches credentials)`);
+  }
   const head = spawnSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" });
   console.log(`state dir: ${stateDir}`);
   console.log(`watch: configured (key present, never printed); repo at ${(head.stdout ?? "").trim().slice(0, 12)}`);
@@ -318,7 +320,7 @@ try {
     } else {
       const answers = Object.entries(result.watch.answers ?? {})
         .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1));
-      const flagged = answers.filter(([, noul]) => (noul ?? 0) >= CALLOUT_THRESHOLD).map(([name]) => name);
+      const flagged = answers.filter(([, probability]) => (probability ?? 0) >= CALLOUT_THRESHOLD).map(([name]) => name);
       console.log(`  answers (desc): ${answers.map(([name, noul]) => `${name} ${noul ?? "null"}`).join(", ")}`);
       console.log(`  ≥${CALLOUT_THRESHOLD}: ${flagged.length === 0 ? "(none)" : flagged.join(", ")}`);
       if (result.watch.usage !== undefined) {
@@ -347,17 +349,19 @@ try {
     });
   }
 
-  const results = [];
-  for (const arm of selected) {
-    let result = runArms([arm])[0];
-    if (result.outcome === "failed") {
-      console.log(`  technically failed (${result.why}) — re-running ${arm.name} once, per the map's rule`);
-      result = runArms([arm])[0];
-      result.retried = true;
+  // The primary pass batches the selected arms through the driver (arity =
+  // batch size, exercising the scope-mandatory law from 2 up); only the
+  // re-runs go solo.
+  const results = runArms(selected);
+  for (let i = 0; i < results.length; i += 1) {
+    if (results[i].outcome === "failed") {
+      console.log(`  technically failed (${results[i].why}) — re-running ${selected[i].name} once, per the map's rule`);
+      const retried = runArms([selected[i]])[0];
+      retried.retried = true;
+      results[i] = retried;
     }
-    results.push(result);
-    printArm(result);
   }
+  for (const result of results) printArm(result);
 
   step("battery results");
   const count = (outcome) => results.filter((r) => r.outcome === outcome).length;
