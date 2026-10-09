@@ -2,9 +2,8 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { WATCH_QUESTIONS } from "../src/watch.ts";
 import { createFactory } from "../plugin/server/core/factory.ts";
@@ -166,7 +165,7 @@ test("runner: preflight demands the human-placed watch.json and never creates it
   // The claim-CLI wrapper check passes (the file exists), so the watch.json
   // check is the one that fires — exactly the runbook's human-act boundary.
   mkdirSync(join(stateDir, "bin"), { recursive: true });
-  spawnSync("touch", [join(stateDir, "bin", "factory-claim")]);
+  writeFileSync(join(stateDir, "bin", "factory-claim"), "# stand-in for the plugin-generated wrapper\n");
 
   const result = spawnSync(process.execPath, [runner, "--home", join(dir, "paseo-home")], { encoding: "utf8" });
   assert.equal(result.status, 1);
@@ -198,9 +197,10 @@ test("dry-run: staging, --watch --description contracting, and the no-daemon fai
   disposeDir(t, dir);
   const stateDir = join(dir, "paseo-home", "plugin-state", "paseo-factory");
   // A fake watch config with a dummy key — the fake home's law, never the
-  // trial home's (the human act stays the human's there).
+  // trial home's (the human act stays the human's there). Mode 600 like the
+  // runbook demands, or the runner's preflight refuses it.
   mkdirSync(stateDir, { recursive: true });
-  writeFileSync(join(stateDir, "watch.json"), JSON.stringify({ apiKey: "fake-key-for-dry-run" }));
+  writeFileSync(join(stateDir, "watch.json"), JSON.stringify({ apiKey: "fake-key-for-dry-run" }), { mode: 0o600 });
   ensureClaimCli(stateDir, join(repoRoot, "plugin"), process.execPath);
   const factory: Factory = createFactory({ stateDir });
   const spool = startSpool(stateDir, factory);
@@ -231,4 +231,29 @@ test("dry-run: staging, --watch --description contracting, and the no-daemon fai
 
   // Scratch workspaces cleaned; the audit trail (contracts) stays.
   assert.deepEqual(readdirSync(stateDir).filter((name) => name.startsWith("watch-ws-")), [], "scratch workspaces cleaned");
+});
+
+test("dry-run: the primary pass batches — three n=3 driver invocations over nine arms", async (t: TestContext) => {
+  const dir = makeTempDir("watch-battery-test-");
+  disposeDir(t, dir);
+  const stateDir = join(dir, "paseo-home", "plugin-state", "paseo-factory");
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "watch.json"), JSON.stringify({ apiKey: "fake-key-for-dry-run" }), { mode: 0o600 });
+  ensureClaimCli(stateDir, join(repoRoot, "plugin"), process.execPath);
+  const factory: Factory = createFactory({ stateDir });
+  const spool = startSpool(stateDir, factory);
+  t.after(() => spool.stop());
+
+  // No daemon behind the fake home: every batch dies at the driver's daemon
+  // preflight, every arm fails technically, each is re-run once — the
+  // batching shape is what this test pins.
+  const result = await runRunner(["--home", join(dir, "paseo-home")]);
+  assert.equal(result.status, 1, "all arms failed without a daemon — exit carries it");
+  const invocationSizes = (result.stdout.match(/^== factory run .+ \(n=(\d+)\)$/gm) ?? []).map((line) => Number(line.match(/\(n=(\d+)\)$/)?.[1]));
+  assert.equal(invocationSizes.length, 12, "3 primary batch invocations + 9 solo re-runs");
+  assert.deepEqual(invocationSizes.slice(0, 3), [3, 3, 3], "the primary pass runs three n=3 batches");
+  assert.ok(invocationSizes.slice(3).every((n) => n === 1), "every re-run is solo");
+  assert.equal(factory.ledger.events.filter((e) => e.event === "contract_set").length, 18, "one contract per staging, 18 stagings");
+  assert.equal(factory.ledger.events.filter((e) => e.event === "spawn_dispatched").length, 0, "no spawn line without a daemon");
+  assert.match(result.stdout, /battery settled: arms=9 watch-written=0 failed=9/);
 });
