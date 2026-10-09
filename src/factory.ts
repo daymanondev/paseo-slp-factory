@@ -4,8 +4,8 @@ import { Ledger } from "./ledger.ts";
 import { runGate } from "./gate.ts";
 import { renderReport } from "./report.ts";
 import { loadEyeConfig, runFreshEyesPass } from "./fresh-eyes.ts";
-import { loadWatchConfig, runWatchPass } from "./watch.ts";
-import type { TimelineFetcher } from "./watch.ts";
+import { copilotAvailable, runWatchPass } from "./watch.ts";
+import type { CopilotRunner, TimelineFetcher } from "./watch.ts";
 import { changesOutsideScope, checkCleanAt, headCommitSync, resolveClaimedCommit } from "./workspace.ts";
 import { FactoryError } from "./errors.ts";
 import type { AttemptAccepted, ContractSet, GateFinished, GitBlocked, LedgerEvent, SpawnDispatched, SpawnRefused, Verdict } from "./events.ts";
@@ -30,8 +30,10 @@ export interface FactoryOptions {
   fetchTimeline?: TimelineFetcher;
   /** Watch total budget override (ms), all tries together (tests). Defaults to WATCH_TOTAL_BUDGET_MS. */
   watchBudgetMs?: number;
-  /** Watch fetch implementation override (tests) — the endpoint stays pinned regardless. */
-  watchFetchImpl?: typeof fetch;
+  /** Copilot CLI availability probe override (tests) — the watch's whole config surface (amendment 2). */
+  watchCopilotProbe?: () => boolean;
+  /** Copilot CLI runner override (tests) — the model and flags stay pinned regardless. */
+  watchCopilotRunner?: CopilotRunner;
 }
 
 export interface ContractInput {
@@ -227,9 +229,12 @@ export function createFactory(options: FactoryOptions): Factory {
         }
       }
       if (watch === true) {
-        const watchConfig = loadWatchConfig(stateDir);
-        if (!watchConfig.ok) {
-          throw new FactoryError("watch-unconfigured", `the watch is on, but it is not usable: ${watchConfig.reason}`);
+        const usable = options.watchCopilotProbe === undefined ? copilotAvailable() : options.watchCopilotProbe();
+        if (!usable) {
+          throw new FactoryError(
+            "watch-unconfigured",
+            "the watch is on, but the copilot CLI is not usable on PATH — install and auth it for the daemon user (the CLI carries the watch's auth; there is no key file)",
+          );
         }
       }
       const existing = ledger.eventsFor(task).some((e) => e.event === "contract_set");
@@ -280,7 +285,7 @@ export function createFactory(options: FactoryOptions): Factory {
         scopeViolations,
         fetchTimeline: options.fetchTimeline,
         budgetMs: options.watchBudgetMs,
-        fetchImpl: options.watchFetchImpl,
+        copilotRunner: options.watchCopilotRunner,
       });
 
       // H6 rider (v0.0.5 ticket 02): an accepted task is closed — a Claim on it
@@ -618,7 +623,7 @@ async function finish(
     scopeViolations: string[] | undefined;
     fetchTimeline: TimelineFetcher | undefined;
     budgetMs: number | undefined;
-    fetchImpl: typeof fetch | undefined;
+    copilotRunner: CopilotRunner | undefined;
   },
 ): Promise<ClaimOutcome> {
   let outputPath: string | undefined;
@@ -666,7 +671,7 @@ async function finish(
       fetchTimeline: watch.fetchTimeline,
       gitBlocks,
       ...(watch.budgetMs === undefined ? {} : { budgetMs: watch.budgetMs }),
-      ...(watch.fetchImpl === undefined ? {} : { fetchImpl: watch.fetchImpl }),
+      ...(watch.copilotRunner === undefined ? {} : { copilotRunner: watch.copilotRunner }),
     });
     ledger.append({
       event: "watch_written",

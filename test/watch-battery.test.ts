@@ -158,28 +158,38 @@ test("runner: refuses the missing --home, the prod home, and the unknown arm", a
   assert.equal(existsSync("/tmp/watch-battery-unused"), false, "nothing was created before the refusal");
 });
 
-test("runner: preflight demands the human-placed watch.json and never creates it", (t: TestContext) => {
+test("runner: preflight demands a usable copilot CLI when none is on PATH", (t: TestContext) => {
   const dir = makeTempDir("watch-battery-test-");
   disposeDir(t, dir);
   const stateDir = join(dir, "paseo-home", "plugin-state", "paseo-factory");
-  // The claim-CLI wrapper check passes (the file exists), so the watch.json
-  // check is the one that fires — exactly the runbook's human-act boundary.
+  // The claim-CLI wrapper check passes, so the copilot probe is the one that
+  // fires — the watch and the arms' agents both ride that CLI (amendment 2).
   mkdirSync(join(stateDir, "bin"), { recursive: true });
   writeFileSync(join(stateDir, "bin", "factory-claim"), "# stand-in for the plugin-generated wrapper\n");
 
-  const result = spawnSync(process.execPath, [runner, "--home", join(dir, "paseo-home")], { encoding: "utf8" });
+  const result = spawnSync(process.execPath, [runner, "--home", join(dir, "paseo-home")], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, // no copilot anywhere
+  });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /no watch config at/);
-  assert.match(result.stderr, /never creates credentials/);
-  assert.equal(existsSync(join(stateDir, "watch.json")), false, "the runner never wrote a watch config");
+  assert.match(result.stderr, /no usable copilot CLI on PATH/);
+  assert.match(result.stderr, /v0.0.6 amendment 2/);
   assert.deepEqual(readdirSync(stateDir).filter((name) => name.startsWith("watch-ws-")), [], "no workspace was staged before the preflight refusal");
-  rmSync(join(stateDir, "bin", "factory-claim"), { force: true });
 });
 
+/** A fake copilot binary dir — preflights (and any pass) find this first on PATH. */
+function fakeCopilotBin(dir: string): string {
+  const bin = join(dir, "fake-bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "copilot"), "#!/bin/sh\necho \"Fake Copilot CLI 0.0.0-test\"\nexit 0\n");
+  chmodSync(join(bin, "copilot"), 0o755);
+  return bin;
+}
+
 /** Async on purpose: a sync spawn would block this process's event loop, and the spool poll lives here. */
-function runRunner(args: string[]): Promise<{ status: number | null; stdout: string; stderr: string }> {
+function runRunner(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [runner, ...args], { env: { ...process.env } });
+    const child = spawn(process.execPath, [runner, ...args], { env: { ...env } });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
@@ -196,17 +206,20 @@ test("dry-run: staging, --watch --description contracting, and the no-daemon fai
   const dir = makeTempDir("watch-battery-test-");
   disposeDir(t, dir);
   const stateDir = join(dir, "paseo-home", "plugin-state", "paseo-factory");
-  // A fake watch config with a dummy key — the fake home's law, never the
-  // trial home's (the human act stays the human's there). Mode 600 like the
-  // runbook demands, or the runner's preflight refuses it.
   mkdirSync(stateDir, { recursive: true });
-  writeFileSync(join(stateDir, "watch.json"), JSON.stringify({ apiKey: "fake-key-for-dry-run" }), { mode: 0o600 });
   ensureClaimCli(stateDir, join(repoRoot, "plugin"), process.execPath);
-  const factory: Factory = createFactory({ stateDir });
+  // The in-process factory serves the contracts: its watch fail-fast probe is
+  // faked true (hermetic — no real copilot needed); the runner child finds the
+  // fake CLI binary first on its own PATH for its preflight.
+  const factory: Factory = createFactory({ stateDir, watchCopilotProbe: () => true });
   const spool = startSpool(stateDir, factory);
   t.after(() => spool.stop());
+  const bin = fakeCopilotBin(dir);
 
-  const result = await runRunner(["--home", join(dir, "paseo-home"), "--arm", "control-clean"]);
+  const result = await runRunner(["--home", join(dir, "paseo-home"), "--arm", "control-clean"], {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+  });
   assert.equal(result.status, 1, `the arm ends technically failed — exit carries it\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
   assert.match(result.stdout, /factory contract --watch --scope src,test --description "<\d+ chars of plant>"/, "the contract line names the watch mark and the plant size, never the plant text itself");
 
@@ -238,16 +251,16 @@ test("dry-run: the primary pass batches — three n=3 driver invocations over ni
   disposeDir(t, dir);
   const stateDir = join(dir, "paseo-home", "plugin-state", "paseo-factory");
   mkdirSync(stateDir, { recursive: true });
-  writeFileSync(join(stateDir, "watch.json"), JSON.stringify({ apiKey: "fake-key-for-dry-run" }), { mode: 0o600 });
   ensureClaimCli(stateDir, join(repoRoot, "plugin"), process.execPath);
-  const factory: Factory = createFactory({ stateDir });
+  const factory: Factory = createFactory({ stateDir, watchCopilotProbe: () => true });
   const spool = startSpool(stateDir, factory);
   t.after(() => spool.stop());
+  const bin = fakeCopilotBin(dir);
 
   // No daemon behind the fake home: every batch dies at the driver's daemon
   // preflight, every arm fails technically, each is re-run once — the
   // batching shape is what this test pins.
-  const result = await runRunner(["--home", join(dir, "paseo-home")]);
+  const result = await runRunner(["--home", join(dir, "paseo-home")], { ...process.env, PATH: `${bin}:${process.env.PATH}` });
   assert.equal(result.status, 1, "all arms failed without a daemon — exit carries it");
   const invocationSizes = (result.stdout.match(/^== factory run .+ \(n=(\d+)\)$/gm) ?? []).map((line) => Number(line.match(/\(n=(\d+)\)$/)?.[1]));
   assert.equal(invocationSizes.length, 12, "3 primary batch invocations + 9 solo re-runs");

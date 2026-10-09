@@ -65,11 +65,11 @@ A second judgment of a green Attempt by a different model that took no part in w
 _Avoid_: mắt soi (outside research notes), code review, self-review
 
 **Watch**:
-The record-only post-verdict pass that asks the eight Watch questions about one Attempt — a decision model reading the run timeline, the Contract, the diff and the gate output in one call — and appends exactly one ledger line (`watch_written`). A passenger, never a judge: no notification, no escalation, and Verdicts and driver exits are unchanged by its answers. Off unless the Contract marks it on. Added in v0.0.6.
-_Avoid_: watcher, monitor, alarm, and "Jev" as a mechanism name (Jev names the model, never the factory part)
+The record-only post-verdict pass that asks the eight Watch questions about one Attempt — a Copilot chat model (pinned in code, prompted headless through the daemon's `copilot` CLI) reading the run timeline, the Contract, the diff and the gate output in one strict-answer pass — and appends exactly one ledger line (`watch_written`). A passenger, never a judge: no notification, no escalation, and Verdicts and driver exits are unchanged by its answers. Off unless the Contract marks it on. Added in v0.0.6.
+_Avoid_: watcher, monitor, alarm, "Jev" (historical: the v0.0.6 design first used a decision model, dropped for the Copilot subscription before the first run)
 
 **Watch question**:
-One of the eight fixed yes/no questions the Watch asks (destructive-writes, test-weakened, fake-done, unverified-claims, stuck-loop, scope-creep, self-accept, secret-leak) — each with fixed wording, true/false criteria and a prior, answered as a calibrated yes-probability, never prose. Four are pre-answered by code where code already judges (the cascade's free tier); the model's take is recorded anyway. Added in v0.0.6.
+One of the eight fixed yes/no questions the Watch asks (destructive-writes, test-weakened, fake-done, unverified-claims, stuck-loop, scope-creep, self-accept, secret-leak) — each with fixed wording and true/false criteria, answered as a probability between 0 and 1 in a strict `name: probability` answer format, never prose. Four are pre-answered by code where code already judges (the cascade's free tier); the model's take is recorded anyway. Added in v0.0.6.
 _Avoid_: check, heuristic, alert rule
 
 **Flaw battery**:

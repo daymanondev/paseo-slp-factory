@@ -127,28 +127,44 @@ export function eyeAnswer(text: string): unknown {
   return { content: [{ type: "text", text }] };
 }
 
-/** Writes the watch's config (v0.0.6 shape) — one key, nothing else. */
-export function writeWatchConfig(stateDir: string, apiKey = "test-watch-key"): void {
-  mkdirSync(stateDir, { recursive: true });
-  writeFileSync(join(stateDir, "watch.json"), `${JSON.stringify({ apiKey }, null, 2)}\n`);
+/** One recorded invocation of the fake Copilot CLI. */
+export interface FakeCopilotCall {
+  args: string[];
+  cwd: string;
+  stdin: string;
+  timeoutMs: number;
 }
 
-/** The eight watch answers, all present — the happy-path Decisions response. */
-export function jevAnswer(answers: Record<string, number>, usage?: { input_tokens?: number; cost?: number }): unknown {
-  return {
-    id: "gen-dec-test",
-    model: "typesafe/jev-1.13-20260917",
-    answers: Object.fromEntries(Object.entries(answers).map(([name, noul]) => [name, { type: "noul", noul }])),
-    usage: { input_tokens: 476, output_tokens: 70, ...(usage ?? {}) },
-  };
+/** What one fake CLI invocation answers — the result shape the runner contract returns. */
+export interface FakeCliResult {
+  code: number;
+  stdout: string;
+  stderr?: string;
+  timedOut?: boolean;
+  /** Delay before answering (ms) — budget tests let the clock run out. */
+  delayMs?: number;
 }
 
 /**
- * A fetch stand-in that reroutes the watch's pinned OpenRouter URL to the
- * loopback fake — the endpoint is pinned in code by law, so tests redirect it
- * here instead of configuring it. Any other URL passes through untouched.
+ * A stand-in for the watch's Copilot CLI runner (amendment 2): records every
+ * invocation and answers from a script — hermetic, no network, no binary. The
+ * script is called per invocation so a test can fail the first call and pass
+ * the second (the retry rule) or run out the budget.
  */
-export function fetchViaFake(fake: FakeEye): typeof fetch {
-  return ((input: string | URL | Request, init?: RequestInit) =>
-    fetch(String(input).replace("https://openrouter.ai", fake.url), init)) as unknown as typeof fetch;
+export function fakeCopilotRunner(script: (call: FakeCopilotCall, index: number) => FakeCliResult) {
+  const calls: FakeCopilotCall[] = [];
+  const runner = async (call: { args: string[]; cwd: string; stdin: string; timeoutMs: number }) => {
+    calls.push(call);
+    const answer = script(call, calls.length - 1);
+    if (answer.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, answer.delayMs));
+    return { code: answer.code, stdout: answer.stdout, stderr: answer.stderr ?? "", timedOut: answer.timedOut ?? false };
+  };
+  return { runner, calls };
+}
+
+/** The CLI's happy answer: the eight `name: number` lines, the strict output contract satisfied. */
+export function copilotAnswerLines(answers: Record<string, number>): string {
+  return Object.entries(answers)
+    .map(([name, probability]) => `${name}: ${probability}`)
+    .join("\n");
 }

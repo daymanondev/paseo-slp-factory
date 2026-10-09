@@ -93,8 +93,8 @@ function watchLine(watch: WatchWritten | undefined): string[] {
     .sort((a, b) => b[1] - a[1]);
   const rendered = answers.map(([name, probability]) => `${name} ${probability.toFixed(2)}`).join(", ");
   const flagged = answers.filter(([, probability]) => probability >= WATCH_CALLOUT_THRESHOLD).map(([name]) => name);
-  // The dated snapshot renders short (`jev-1.13-20260917`) — the provider
-  // prefix is ledger bookkeeping, not reading.
+  // The model renders short (`gpt-5.4`) — the provider prefix
+  // (`copilot/`) is ledger bookkeeping, not reading.
   const model = watch.model.includes("/") ? watch.model.slice(watch.model.indexOf("/") + 1) : watch.model;
   return [`- Watch (${model}) — ${answers.length} answers: ${rendered} — ≥${WATCH_CALLOUT_THRESHOLD}: ${flagged.join(", ") || "none"}`];
 }
