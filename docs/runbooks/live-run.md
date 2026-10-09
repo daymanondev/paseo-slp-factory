@@ -1,9 +1,10 @@
 # Runbook — live run: one task through the factory
 
-The ritual as it has actually run twice — ticket 09 (v0.0.1,
-`.scratch/factory-v0.0.1/issues/09-live-run.md`) and ticket 06 (v0.0.2,
-`.scratch/factory-v0.0.2/issues/06-live-run-2.md`); those run logs are the
-primary sources, this file is the operator's checklist. Follow it top to
+The ritual as it has actually run three times — ticket 09 (v0.0.1,
+`.scratch/factory-v0.0.1/issues/09-live-run.md`), ticket 06 (v0.0.2,
+`.scratch/factory-v0.0.2/issues/06-live-run-2.md`) and ticket 03 (v0.0.4,
+`.scratch/factory-v0.0.4/issues/03-live-measurements.md`); those run logs are
+the primary sources, this file is the operator's checklist. Follow it top to
 bottom. The baseline in step 2 is a step, not a virtue: skipping it makes a
 later red unattributable (ticket 09's attempt 1 went red for an environment
 reason, and only the green baseline made that legible).
@@ -80,8 +81,10 @@ before-hook (ADR 0004):
     paseo run --background --title <task-id> \
       --provider <provider[/model]> --home ~/.paseo-factory "<brief>"
 
-Provider-default permission mode maps to "Always Ask" — that is expected; the
-permit loop (step 6) exists to absorb it.
+Provider-default permission mode maps to "Always Ask" — that is expected.
+For a contracted agent the create-time pin (v0.0.4) forces exactly that, and
+the choke (step 6) answers the asks; for a non-contract agent the manual
+loop (step 6) absorbs them.
 
 **The brief — fixed template, edit only the placeholders:**
 
@@ -93,15 +96,25 @@ permit loop (step 6) exists to absorb it.
 > Your shells under the daemon start without git/node/npm on PATH — export
 > PATH="$HOME/.local/bin:$HOME/.nvm/versions/node/v24.21.0/bin:$PATH" first.
 
-## 6. Permit loop
+## 6. Permits
 
-One terminal, started before the agent's first shell command:
+For a **contracted agent there is nothing to run** (v0.0.4): the choke
+answers every ask itself — allow by default, deny + one `permit_denied`
+ledger line on the deny-list — and the create-time mode pin makes sure the
+asks always surface. Measured live in ticket 03 (v0.0.4): 20 asks, all
+answered by the plugin, 0 operator permit acts. Paseo itself persists no
+permission record, so the ledger's `permit_allowed` / `permit_denied` /
+`git_blocked` lines are the run's only audit trail — `factory status` shows
+them per task as `choke=<allowed>/<denied>/<blocked>`.
+
+Non-contract agents are not the choke's business (map decision 5) — for
+those, the manual fallback remains, one terminal started before the agent's
+first shell command:
 
     node scripts/permit-loop.mjs --home ~/.paseo-factory --agent <agent short id>
 
-One stdout line per grant; the grant count is the run's permit metric (09:
-~10 grants, 06: 19 — the parade persists and is 0.0.3's theme; the count is
-its baseline).
+One stdout line per grant; the grant count is that run's permit metric
+(09: ~10 grants, 06: 19 — the parade that motivated the choke).
 
 ## 7. Monitor
 

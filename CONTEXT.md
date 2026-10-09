@@ -65,12 +65,30 @@ A set of deliberately flawed, gate-green Tasks — plus one clean control — ru
 _Avoid_: test suite, eval harness, mutation suite
 
 **Arm**:
-One member of a flaw battery: a Workspace carrying one planted flaw (or none, in the control), its Contract, and the ground truth a finding is compared against.
+One member of a battery (flaw or bypass): a Workspace carrying one planted flaw or escape (or none, in the control), its Contract, and the ground truth an outcome is compared against.
 _Avoid_: case, scenario, fixture (that names the files)
 
 **Battery outcome**:
 The comparison words for one arm against ground truth: hit (CONCERN citing the planted flaw), miss (CLEAR on a flawed arm), noisy hit (CONCERN citing only non-planted nits), false positive (CONCERN on the clean control), failed (technical).
 _Avoid_: pass/fail (those are Verdict words)
+
+### Permissions
+
+**Permit ask**:
+The daemon's question whenever an agent wants to run a shell command it cannot run unasked (or, under some modes, edit a file). Since v0.0.4 the plugin answers every ask from a contracted Agent itself; Paseo persists no record of its own, so the ledger's `permit_allowed` / `permit_denied` lines are the only audit trail an ask ever leaves.
+_Avoid_: permission prompt (the daemon's UI word), approval, grant
+
+**Choke policy**:
+The judge over permit asks from contracted Agents: default-allow with a small deny-list — the dangerous-git vocabulary on any spelling, and writes outside the writable set (workspace ∪ /tmp ∪ TMPDIR ∪ factory state dir). A deny is choke-and-record: one ledger line, one report line, no mid-task escalation channel. Uncontracted asks are not its business.
+_Avoid_: sandbox, warden (that would be daemon-wide), allowlist (the stance is the opposite)
+
+**Git shim**:
+A `git` wrapper in the hook-injected PATH dir that refuses the destructive git subcommands (force/delete push, `reset --hard`, deleting `clean`, working-tree discard, `branch -D`, recovery destruction) at exec time no matter who runs them — explanatory stderr line plus one `git_blocked` ledger line; everything else passes through to the real git. Composes with the Choke policy: the shim nets PATH-resolved git, the policy nets everything that asks.
+_Avoid_: git wrapper (too generic), git hook (different mechanism)
+
+**Bypass battery**:
+The instrument that measures the choke: four planted escape arms plus a clean control, run against the real plugin on the trial daemon, outcomes asserted against rules fixed before any run (choked = not executed + exactly one ledger line; escaped; clean; failed). The runner never judges and never accepts, and refuses the prod home.
+_Avoid_: pentest, red team, security audit
 
 **Retro**:
 A scheduled fresh-context pass that reads the Ledger, Reports and gate notes and emits proposals — new Gate checks for repeated failures, draft Contracts for knowledge gaps. It never applies its own proposals.
