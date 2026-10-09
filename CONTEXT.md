@@ -30,6 +30,10 @@ _Avoid_: spec, acceptance criteria, hợp đồng (outside research notes)
 The git working copy a Task's work lives in; the Gate runs there and the Artifact is resolved inside it.
 _Avoid_: repo, project dir, cwd
 
+**Workspace conflict**:
+Two live Contracts whose Workspaces are the same tree, or one nested inside the other. Refused at contract time (the second `factory contract` exits 2, no ledger line — nothing changed, so nothing is recorded) and again at spawn time for already-contracted tasks; a conflict retires only when the live Contract is accepted. Prevention, not resolution — there is no merge machinery. Added in v0.0.5.
+_Avoid_: scope conflict (the charted name — the real key is workspace overlap, not scope intersection), merge conflict
+
 **Gate**:
 The command named in a Contract whose exit status is the factual check of the work.
 _Avoid_: test step, check, cổng (outside research notes)
@@ -106,6 +110,18 @@ _Avoid_: summary, biên bản (outside research notes)
 
 ### Running
 
+**Spawn**:
+Starting a contracted Task's Agent: a `spawn` request through the spool, validated by the plugin (request shape, task known and not accepted, scope mandatory when the invocation carries two or more tasks, no workspace conflict) and recorded as exactly one ledger line — `spawn_dispatched` or `spawn_refused` with its rule — before any agent exists. Added in v0.0.5.
+_Avoid_: launch, fork, dispatch (that names the happy ledger line)
+
+**Driver**:
+`factory run <task>… --provider <p[/m]>` — the command that takes explicit task ids, creates each task's branch, spawns each Agent (through the spool) and watches to verdict, printing each task's verdict at its own terminal moment and exiting 0 only when every task ran green with zero refusals. It never sets Contracts and never Accepts; it stops at verdicts. Added in v0.0.5.
+_Avoid_: orchestrator, runner, supervisor (that is a seatworks role)
+
+**Parallel run**:
+The Driver running more than one contracted Task at once: the number of task ids on the invocation is the ceiling, every Task works in its own Workspace, and a scope is mandatory — an unscoped Contract is refused at Spawn when two or more tasks are requested. Added in v0.0.5.
+_Avoid_: concurrency (too broad), batch, pool
+
 **Unattended loop**:
-A driver loop that takes approved Contracts, spawns Agents, runs Gates and records Verdicts without the Owner present. It commits to branches only; landing to main is always a human act. Not part of v0.0.1.
+A driver loop that takes approved Contracts, spawns Agents, runs Gates and records Verdicts without the Owner present. It commits to branches only; landing to main is always a human act. The Driver is its first shipped slice (v0.0.5); schedules and no-Owner operation remain later rows.
 _Avoid_: autopilot, background job, cron
