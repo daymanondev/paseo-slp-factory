@@ -37,6 +37,8 @@ export const POLL_MS = 5_000;
 export const STAGGER_MS = 3_000;
 /** Stall is report-only: status `running` with no timeline growth (or an ask parked this long) warns once. */
 export const STALL_WARN_MS = 10 * 60_000;
+/** A fetch that answers `agent: null` for this long after create is a death — 0.11 answers unready agents with null, not an error. */
+export const AGENT_MISSING_DEAD_MS = 2 * 60_000;
 /** Creating an agent runs the before-hooks and boots a provider session — this is not a fast RPC. */
 const CREATE_TIMEOUT_MS = 120_000;
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -463,6 +465,7 @@ export async function observeTasks(rpc, entries, { pollMs = POLL_MS, log = () =>
     entry.timelineSeq = -1;
     entry.timelineStillSince = Date.now();
     entry.warned = false;
+    entry.missingSince = undefined;
   }
   while (entries.some((e) => e.terminal === undefined)) {
     for (const entry of entries) {
@@ -472,7 +475,18 @@ export async function observeTasks(rpc, entries, { pollMs = POLL_MS, log = () =>
         if (!rpc.connected) await reconnect(rpc, log);
         const payload = await rpc.request({ type: "fetch_agent_request", agentId: entry.agentId }, { responseType: "fetch_agent_response" });
         if (payload.error !== undefined && payload.error !== null) throw rpcError(payload.error);
-        if (payload.agent === null || payload.agent === undefined) throw rpcError("agent not found — the daemon no longer has its record");
+        if (payload.agent === null || payload.agent === undefined) {
+          // Daemon 0.11 answers an agent it cannot yet serve with `agent: null`
+          // and no error — right after create this is a registration race, not
+          // a death; only a null that persists past AGENT_MISSING_DEAD_MS is.
+          if (entry.missingSince === undefined) {
+            entry.missingSince = Date.now();
+          } else if (Date.now() - entry.missingSince > AGENT_MISSING_DEAD_MS) {
+            throw rpcError("agent not found — the daemon no longer has its record");
+          }
+          continue;
+        }
+        entry.missingSince = undefined;
         snapshot = payload.agent;
       } catch (err) {
         if (err.rpc === true) {
