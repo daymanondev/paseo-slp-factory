@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2026-10-09
+
+v0.0.5's one thing: the driver. `factory run <task>… --provider <p[/m]>` takes
+explicit task ids, creates each task's branch, spawns each one's agent through
+the spool (the plugin validates and appends exactly one line per spawn —
+`spawn_dispatched` or `spawn_refused` — before any agent exists), and watches
+to verdict; it never sets Contracts and never Accepts. Proven by the version's
+pre-registered measurements on the trial daemon (ticket 05), all four
+first-attempt: the same task pair run serial-then-parallel through the driver —
+**parallel 835.0s vs serial 1304.9s wall-clock (−36%), every judging invariant
+holding under interleaving** (ledger seq 1..377 with zero tears, every line
+task-attributed, each verdict's gate run in its own workspace at its claimed
+sha, 107 permit asks all answered by the choke with 0 denies); the conflict arm
+exact on both sub-arms — an unscoped Contract refused at spawn with exactly one
+`spawn_refused` line and no agent started (the survivor still ran green), and a
+workspace equal/nested/containing a live contract's refused at contract time
+(exit 2, no line); and the fresh-eyes compose-check clean (the eye's
+`fresh_eyes_written` line landed interleaved with the other task's events). The
+roadmap row's two standing questions, answered with the measured numbers:
+parallel really is faster at n=2 (−36% for the pair; the per-task inflation
++18%/+4% is the honest tax, and $9.75 total judging cost — parallelism buys
+time, not money), and conflicts are prevented, not resolved (refusal at the
+earliest possible moment — spawn or contract — one ledger line or none, and no
+agent ever starts behind a refusal).
+
+### Added
+
+- The driver (tickets 03–04): `plugin/bin/driver.mjs` behind `factory run` —
+  zero-dep plain node, one WebSocket to the daemon. Local pre-spawn sanity
+  (workspace exists, tree clean — exit 2, no spool request, no line), a
+  driver-created branch per task (`git switch -c <task-id>`, switch-if-exists
+  on re-run; the agent never creates branches), the runbook's brief template
+  with the PATH line baked at spawn time, agent creation over the daemon RPC
+  (idempotencyKey = task id, so a crashed driver re-runs safely and gets the
+  same agent — never a second one), ~5s snapshot polling with each verdict
+  printed at its own terminal moment, a 3s stagger between agent creates,
+  stall report-only (no kill, no respawn in v1), exit 0 iff all tasks ran
+  green with zero refusals.
+- Spawn through the spool (ADR 0004 amended — the `spawn` request kind joins
+  contract/accept/claim; the one-writer law is unchanged): the plugin validates
+  request shape, task known and not accepted, scope mandatory at arity ≥ 2,
+  and workspace overlap against live contracts — one no-attempt ledger line
+  either way, refusal rules `spawn:invalid-request`, `spawn:invalid-task`,
+  `spawn:unknown-task`, `spawn:accepted-task`, `spawn:scope-mandatory`,
+  `spawn:workspace-conflict`.
+- The workspace-conflict guard (ticket 02's audit, H1/H2): `setContract`
+  refuses a workspace that equals, nests inside, or contains a live contract's
+  (exit 2, no ledger line; a conflict retires when its contract is accepted) —
+  shared trees can no longer break verdicts or misattribute permit lines.
+  The H6 rider rides with it: a Claim on an accepted task now refuses
+  (`already-accepted`) instead of silently opening a fresh Attempt.
+
+### Changed
+
+- `factory status` knows the two spawn event names (a refused spawn invents no
+  display line — the refusal is already its own ledger line).
+- The version's own live run landed its riders: both CLIs now read the ledger
+  through one shared `plugin/bin/ledger-read.mjs` (the extraction the reader
+  task did green twice — serial and parallel, two independent agents — suite
+  166 → 174), and `docs/runbooks/live-run.md` teaches `factory run` as the
+  primary spawn path with the manual ritual kept as the fallback.
+- `CONTEXT.md` gains the version's vocabulary — Spawn, Driver, Parallel run,
+  Workspace conflict (sharpened from "scope conflict": the conflict key is
+  workspace overlap, not scope intersection).
+
 ## [0.0.4] - 2026-10-09
 
 v0.0.4's one thing: the permission choke. Factory-side policy answers every

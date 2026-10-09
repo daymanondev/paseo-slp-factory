@@ -28,6 +28,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { readLedgerEvents } from "./ledger-read.mjs";
 import { awaitReply, randomId, submit } from "./spool-client.mjs";
 
 /** Snapshot polling cadence — the observe loop's only clock (ticket 03 §5). */
@@ -70,32 +71,20 @@ export function splitProvider(value) {
 // ---- the ledger, read locally (the plugin is the only writer — never this file) -----------------
 
 /**
- * Reads the ledger's complete lines. The one thing the writer's
- * fsync-per-line contract forgives (ADR 0003) is forgiven here too: a last
- * line with no trailing newline was never acknowledged, so it is ignored.
- * A missing ledger is an empty one (the plugin has never run); anything
- * else unreadable throws — the driver refuses to guess.
+ * Reads the ledger's complete lines — through the shared reader
+ * (ledger-read.mjs) under the driver's own policy: the plugin is the only
+ * writer (ADR 0004) and validated each line when it appended it, so blank
+ * lines are skipped and only unparseable JSON refuses. A missing ledger is
+ * an empty one (the plugin has never run); anything else unreadable throws —
+ * the driver refuses to guess.
  */
 export function readDriverLedger(stateDir) {
-  let raw;
-  try {
-    raw = readFileSync(join(stateDir, "ledger.jsonl"), "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return [];
-    throw err;
-  }
-  const lines = raw.split("\n");
-  lines.pop(); // the "" after a final newline — or the unacknowledged unterminated tail
-  const events = [];
-  for (const line of lines) {
-    if (line.trim() === "") continue;
-    try {
-      events.push(JSON.parse(line));
-    } catch {
-      throw new Error(`${join(stateDir, "ledger.jsonl")} is not a readable ledger: line is not valid JSON`);
-    }
-  }
-  return events;
+  const ledgerPath = join(stateDir, "ledger.jsonl");
+  const read = readLedgerEvents(ledgerPath);
+  if (read.missing) return [];
+  if (read.failed !== undefined) throw read.failed;
+  if (read.corrupt !== undefined) throw new Error(`${ledgerPath} is not a readable ledger: ${read.corrupt}`);
+  return read.events;
 }
 
 /** The task's Contract — the driver's pre-spawn source for the workspace. */

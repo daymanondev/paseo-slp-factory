@@ -9,6 +9,13 @@ bottom. The baseline in step 2 is a step, not a virtue: skipping it makes a
 later red unattributable (ticket 09's attempt 1 went red for an environment
 reason, and only the green baseline made that legible).
 
+Since v0.0.5 the middle of the ritual is driven: `factory run` (step 4) owns
+the branch, the spawn and the watching-to-verdict for contracted tasks — what
+the operator still does by hand is preflight, baseline, contract and
+close-out. The manual `paseo run --background` ritual of 09 / 06 / 03 stays
+in this file as the documented fallback (step 5), and for a non-contract
+agent it remains the only path.
+
 ## Standing rules
 
 - Every `paseo` / `factory` command targets the trial home `~/.paseo-factory`.
@@ -45,12 +52,7 @@ confirmed on main"). A gate verdict is only meaningful against a known-green
 baseline — this step is what keeps a red from being misattributed to the
 working agent.
 
-## 3. Branch
-
-`git switch -c live<NN>/<slug>` from main in the real workspace. Landing to
-main stays a human act (ADR 0005).
-
-## 4. Contract — the Owner CLI, set before the agent starts
+## 3. Contract — the Owner CLI, set before the agent starts
 
     node plugin/bin/factory.mjs --home ~/.paseo-factory contract \
       --task live<NN>-<slug> \
@@ -68,25 +70,94 @@ main stays a human act (ADR 0005).
   diff may touch; anything outside goes red. Keep it tight — it is the
   mechanical refusal lane. Note: the drift guard between `src/` and
   `plugin/server/core/` means a task not about that sync should scope away
-  from the copy it does not touch.
+  from the copy it does not touch. At two or more tasks in one `factory run`
+  (step 4) the scope is mandatory — the plugin refuses an unscoped spawn with
+  one `spawn_refused` ledger line.
 - `--fresh-eyes` only when the run means to measure the eye (it needs
   `eye.json`, checked in step 1).
 - `contract_set` records the base sha; note it in the ticket.
+- The contract must precede `factory run` (step 4) — the driver reads the
+  task's workspace and gate from it.
+- Two live contracts may never share a workspace tree: a contract whose
+  workspace equals, nests, or contains a live contract's is refused at
+  contract time — accept or retire the live task first (the same guard fires
+  again at spawn time, step 4).
 
-## 5. Spawn the working agent
+## 4. Spawn and watch — the driver, `factory run` (v0.0.5)
 
-Through the trial daemon only — its agents get `factory-claim` on PATH via the
-before-hook (ADR 0004):
+One command carries a contracted task from branch to verdict:
+
+    node plugin/bin/factory.mjs --home ~/.paseo-factory run <task-id> [<task-id>…] \
+      --provider <provider[/model]>
+
+One `--provider` per invocation — every task in it runs on it. The task count
+is the parallelism ceiling; there is no `--parallel` knob.
+
+Per task, in order:
+
+- **Branch** — the workspace from the contract must exist and sit clean
+  (`git status --porcelain` empty), then the driver cuts the branch named
+  after the task id (`live<NN>-<slug>`; task ids are branch-safe by the same
+  pattern the core enforces: letters, digits, `.`, `_`, `-`). An existing
+  branch is switched to, not recreated (the re-run case). The agent never
+  creates branches. These local refusals exit 2 and write no ledger line.
+- **Spawn** — one `spawn` request per task through the spool; the plugin
+  ledgered `spawn_dispatched` or `spawn_refused` either way, one line each
+  (unknown task, already-accepted task, unscoped contract at arity ≥ 2, a
+  workspace that equals/nests/contains a live contract's). A request that
+  gets no reply stays in the spool and may still be processed.
+- **Create** — the agent is created over the daemon's own WebSocket RPC, its
+  brief this runbook's fixed template (step 5) with the PATH baked from the
+  driver's own environment at spawn time — the operator types nothing.
+  Spawns stagger a few seconds apart — CPU etiquette, not correctness: the
+  gates must not serialize (ticket 03 §7).
+- **Watch** — one observe loop polls ~5s snapshots per agent to its terminal
+  state, reconnecting through a daemon restart (pid + credential re-read);
+  each task's verdict line (attempt, verdict, sha, report path, choke
+  counts) prints the moment it lands, read from the ledger the plugin wrote
+  while the agent worked.
+
+Laws the driver runs under:
+
+- It answers nothing itself: the choke still answers every ask for
+  contracted agents (step 6), and the brief's `factory-claim` loop and the
+  git shim ride the daemon's before-hook (ADR 0004) exactly as they did for
+  a hand-spawned agent.
+- Exit 0 iff every task ended green with zero refusals and no dead agents
+  (`factory: run green — every task verified`); anything else exits 2 with a
+  reason line per task.
+- No respawn, ever: a dead agent is reported (exit 2); retry policy belongs
+  to a later row. A crashed driver is safe to re-run — the spool dedupes
+  replayed requests and the create is idempotency-keyed by task id, so a
+  re-run meets the existing agent or a structured conflict, never a second
+  agent.
+- The daemon is preflighted before any spawn line lands: a dispatched spawn
+  with no agent behind it would be a lie the ledger keeps.
+
+## 5. Fallback — the manual spawn ritual (non-contract agents)
+
+The ritual as it ran in 09 / 06 / 03, kept for a non-contract agent — the
+driver and the choke are not its business (map decision 5). Branch by hand:
+
+    git switch -c live<NN>/<slug>
+
+from main in the real workspace. Landing to main stays a human act
+(ADR 0005).
+
+Spawn through the trial daemon only — its agents get `factory-claim` on PATH
+via the before-hook (ADR 0004):
 
     paseo run --background --title <task-id> \
       --provider <provider[/model]> --home ~/.paseo-factory "<brief>"
 
-Provider-default permission mode maps to "Always Ask" — that is expected.
-For a contracted agent the create-time pin (v0.0.4) forces exactly that, and
-the choke (step 6) answers the asks; for a non-contract agent the manual
-loop (step 6) absorbs them.
+Provider-default permission mode maps to "Always Ask" — that is expected. A
+contracted agent should not come through this loop at all (the driver, step
+4); for a non-contract agent the manual permit loop (step 6) absorbs the
+asks.
 
-**The brief — fixed template, edit only the placeholders:**
+**The brief — fixed template, edit only the placeholders** (the driver
+renders these same words for its own agents — template and code move
+together):
 
 > Do the assigned work on branch `<branch>`. When done: commit, run
 > `git rev-parse HEAD`, then `factory-claim --task <task-id> --sha <sha>`.
@@ -120,6 +191,9 @@ One stdout line per grant; the grant count is that run's permit metric
 
     tail -f ~/.paseo-factory/plugin-state/paseo-factory/ledger.jsonl
     paseo plugin logs paseo-factory --home ~/.paseo-factory
+
+The driver prints each task's verdict line the moment it lands (step 4) —
+the ledger tail is still the live view of everything between the verdicts.
 
 On a red: read the note, then the full gate output at the event's `outputPath`
 before blaming the agent — the note is a capped tail and can hide the root
