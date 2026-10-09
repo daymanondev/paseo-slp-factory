@@ -39,7 +39,7 @@
  * --keep leaves the scratch workspaces behind instead of deleting them.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,7 +61,7 @@ const flag = (name) => {
 };
 const homeFlag = flag("--home");
 const armFlag = flag("--arm");
-const providerFlag = flag("--provider") ?? "claude/claude-sonnet-5";
+const providerFlag = flag("--provider") ?? "copilot/claude-sonnet-4.6";
 const batchSize = Number(flag("--batch-size") ?? 3);
 const waitMins = Number(flag("--wait-mins") ?? 60);
 const keep = argv.includes("--keep");
@@ -140,29 +140,17 @@ try {
   if (!existsSync(join(stateDir, "bin", "factory-claim"))) {
     die(`no claim CLI wrapper at ${join(stateDir, "bin", "factory-claim")} — is the plugin installed and running on this home?`);
   }
-  const watchPath = join(stateDir, "watch.json");
-  if (!existsSync(watchPath)) {
+  const probe = spawnSync("copilot", ["--version"], { encoding: "utf8", timeout: 15_000 });
+  if (probe.status !== 0) {
     die(
-      `no watch config at ${watchPath} — the human places it as {"apiKey"} (mode 600) before the run; ` +
-        `this script never creates credentials (runbook law).`,
+      `no usable copilot CLI on PATH (probe exited ${probe.status === null ? "signal/killed" : probe.status}) — ` +
+        `the watch and the arms' agents both ride it (v0.0.6 amendment 2). Install and auth it for the daemon user.`,
     );
   }
-  let watchConfig;
-  try {
-    watchConfig = JSON.parse(readFileSync(watchPath, "utf8"));
-  } catch (err) {
-    die(`${watchPath} is not readable JSON: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  if (typeof watchConfig.apiKey !== "string" || watchConfig.apiKey.trim() === "") {
-    die(`${watchPath} has no usable "apiKey" string`);
-  }
-  const mode = statSync(watchPath).mode & 0o777;
-  if (mode !== 0o600) {
-    die(`${watchPath} is mode ${mode.toString(8)} — the runbook law is 600 (chmod 600 it; this script never touches credentials)`);
-  }
+  const version = `${probe.stdout ?? ""}${probe.stderr ?? ""}`.trim().split("\n")[0];
   const head = spawnSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" });
   console.log(`state dir: ${stateDir}`);
-  console.log(`watch: configured (key present, never printed); repo at ${(head.stdout ?? "").trim().slice(0, 12)}`);
+  console.log(`watch: copilot CLI ${version}; model pinned in code; repo at ${(head.stdout ?? "").trim().slice(0, 12)}`);
 
   // ---- shared helpers -------------------------------------------------------------------
 

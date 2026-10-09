@@ -43,10 +43,12 @@ agent it remains the only path.
   `~/.paseo-factory/plugin-state/paseo-factory/eye.json` exists and is mode
   600. Credentials are placed by the human before the run, never from inside
   it.
-- When the run measures the watch (v0.0.6): the same law for
-  `~/.paseo-factory/plugin-state/paseo-factory/watch.json` — mode 600,
-  `{"apiKey": "<OpenRouter key>"}` and nothing else. The model and endpoint
-  are pinned in code; only the key is config.
+- When the run measures the watch (v0.0.6, amendment 2): the copilot CLI is
+  usable on the daemon's PATH (`copilot --version` answers) — the watch
+  prompts it headless with the model pinned in code (`gpt-5.4`); there is no
+  key file. The CLI's own auth is the whole credential surface; the wrapper
+  at `/opt/homebrew/bin/copilot` execs the nvm node for the daemon
+  environment.
 
 ## 2. Baseline — mandatory, before the agent exists
 
@@ -81,7 +83,7 @@ working agent.
 - `--fresh-eyes` only when the run means to measure the eye (it needs
   `eye.json`, checked in step 1).
 - `--watch` (v0.0.6) only when the run means to measure the watch (it needs
-  `watch.json`, checked in step 1). The pass is record-only: one
+  the copilot CLI, checked in step 1). The pass is record-only: one
   `watch_written` ledger line after EVERY verdict — red included — and a
   Watch line in the report; verdicts, accepts and driver exits never read it.
 - `--description` (v0.0.6) carries the task's assignment; the driver's brief

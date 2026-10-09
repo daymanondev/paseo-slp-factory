@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createFactory } from "../plugin/server/core/factory.ts";
 import { startSpool } from "../plugin/server/spool.ts";
-import { copyFixture, disposeDir, eyeAnswer, gitCommitAll, gitCommitChanges, makeTempDir, repoRoot, startFakeEye, writeEyeConfig, writeWatchConfig } from "./helpers.ts";
+import { copyFixture, disposeDir, eyeAnswer, gitCommitAll, gitCommitChanges, makeTempDir, repoRoot, startFakeEye, writeEyeConfig } from "./helpers.ts";
 
 /**
  * The mechanical DoD of ticket 08 without a daemon: the real CLIs
@@ -249,9 +249,8 @@ test("the v0.0.6 contract flags round-trip: --watch marks the pass, --descriptio
   gitCommitAll(workspace);
   const home = join(dir, "paseo-home");
   const stateDir = join(home, "plugin-state", "paseo-factory");
-  writeWatchConfig(stateDir); // --watch fails fast without it
 
-  const factory = createFactory({ stateDir });
+  const factory = createFactory({ stateDir, watchCopilotProbe: () => true }); // --watch fail-fasts without a usable copilot CLI
   const spool = startSpool(stateDir, factory);
   t.after(() => spool.stop());
   const ownerEnv = { PASEO_HOME: home };
@@ -272,10 +271,10 @@ test("the v0.0.6 contract flags round-trip: --watch marks the pass, --descriptio
   assert.equal(set.event === "contract_set" ? set.watch : undefined, true, "the mark is Contract data");
   assert.equal(set.event === "contract_set" ? set.description : undefined, "Tighten the pad helper's truncation edge case.");
 
-  // --watch without a usable watch.json is refused loudly, before any line.
+  // --watch without a usable copilot CLI is refused loudly, before any line.
   const home2 = join(dir, "paseo-home2");
   const stateDir2 = join(home2, "plugin-state", "paseo-factory");
-  const factory2 = createFactory({ stateDir: stateDir2 });
+  const factory2 = createFactory({ stateDir: stateDir2, watchCopilotProbe: () => false });
   const spool2 = startSpool(stateDir2, factory2);
   t.after(() => spool2.stop());
   const refused = await run(
@@ -284,7 +283,7 @@ test("the v0.0.6 contract flags round-trip: --watch marks the pass, --descriptio
     { PASEO_HOME: home2 },
   );
   assert.equal(refused.status, 2);
-  assert.match(refused.stderr, /watch\.json/);
+  assert.match(refused.stderr, /copilot CLI/);
   assert.deepEqual([...factory2.ledger.events], [], "no line for the refused contract");
 
   // An empty --description is a usage error, not a silent blank.
