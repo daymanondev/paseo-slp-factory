@@ -54,6 +54,23 @@ export interface AcceptRequest {
 }
 
 /**
+ * A driver's spawn request (v0.0.5, ADR 0004 amendment): `factory run` asks
+ * the plugin — the one writer — whether it may create this task's agent.
+ * The plugin judges (task state, scope-mandatory at arity ≥ 2, workspace
+ * overlap) and appends one ledger line either way; only on ok does the
+ * driver perform its own daemon RPC create. `provider` is recorded on the
+ * line, never interpreted; `arity` is the invocation's task count — the
+ * parallel width the scope rule keys on.
+ */
+export interface SpawnRequest {
+  id: string;
+  kind: "spawn";
+  task: string;
+  provider: string;
+  arity: number;
+}
+
+/**
  * A synthetic permit ask (v0.0.4) — the bypass battery's vehicle into the real
  * choke: the same policy, the same ledger lines, answered in the reply instead
  * of `respondToPermission()` because no daemon ask exists to answer. The task
@@ -70,7 +87,7 @@ export interface AskRequest {
   name?: string;
 }
 
-export type SpoolRequest = ContractRequest | ClaimRequest | AcceptRequest | AskRequest;
+export type SpoolRequest = ContractRequest | ClaimRequest | AcceptRequest | AskRequest | SpawnRequest;
 
 /** Handles a synthetic ask — `createChoke(...).spoolAskHandler` is the implementation. */
 export type AskHandler = (request: AskRequest) => SpoolReply;
@@ -132,6 +149,12 @@ export function parseSpoolRequest(body: unknown): SpoolRequest | undefined {
   if (req.kind === "accept") {
     if (typeof req.task !== "string" || typeof req.attempt !== "number" || !Number.isInteger(req.attempt)) return undefined;
     return { id: req.id, kind: "accept", task: req.task, attempt: req.attempt };
+  }
+  if (req.kind === "spawn") {
+    if (typeof req.task !== "string" || typeof req.provider !== "string" || typeof req.arity !== "number" || !Number.isInteger(req.arity) || req.arity < 1) {
+      return undefined;
+    }
+    return { id: req.id, kind: "spawn", task: req.task, provider: req.provider, arity: req.arity };
   }
   if (req.kind === "ask") {
     if (typeof req.task !== "string" || typeof req.command !== "string" || req.command.trim() === "") return undefined;
@@ -201,6 +224,20 @@ export async function handleSpoolRequest(
         };
       }
       return askHandler(request);
+    }
+    if (request.kind === "spawn") {
+      // The driver's arrival (v0.0.5): one ledger line either way, then the
+      // reply the driver keys its next move on — create the agent, or report
+      // the refusal and carry on with the invocation's other tasks.
+      const decision = factory.requestSpawn({ task: request.task, provider: request.provider, arity: request.arity });
+      if (decision.outcome === "refused") {
+        return { id: request.id, ok: false, code: decision.code, message: decision.event.reason };
+      }
+      return {
+        id: request.id,
+        ok: true,
+        summary: `spawn dispatched for ${request.task} under ${request.provider} (n=${request.arity})`,
+      };
     }
     factory.accept({ task: request.task, attempt: request.attempt });
     return { id: request.id, ok: true, summary: `task ${request.task} accepted at attempt ${request.attempt}` };

@@ -333,3 +333,45 @@ test("status accumulates choke counts per task — counted tasks sum their event
     ].join("\n") + "\n",
   );
 });
+
+test("status reads a ledger with spawn events through — no new fields, no invented lines", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const stateDir = join(dir, "plugin-state", "paseo-factory");
+  const full = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
+  writeLedger(stateDir, [
+    contractEvent(1, "SP-A"),
+    { seq: 2, ts, event: "spawn_dispatched", task: "SP-A", provider: "claude/opus-4-8", arity: 2 },
+    { seq: 3, ts, event: "claim_reported", task: "SP-A", attempt: 1, sha: full, agent: "ag-1" },
+    { seq: 4, ts, event: "gate_finished", task: "SP-A", attempt: 1, exit: 0, verdict: "green", note: "", sha: full },
+    { seq: 5, ts, event: "report_written", task: "SP-A", attempt: 1, path: "/s/report-SP-A-1.md" },
+    contractEvent(6, "SP-B"),
+    { seq: 7, ts, event: "spawn_refused", task: "SP-B", provider: "claude/opus-4-8", arity: 2, rule: "spawn:scope-mandatory", reason: "task SP-B has no scope" },
+    // A refusal for a task that never contracted: it must not invent a line.
+    { seq: 8, ts, event: "spawn_refused", task: "SP-GHOST", provider: "claude", arity: 1, rule: "spawn:unknown-task", reason: "no contract set for task SP-GHOST" },
+  ]);
+
+  const status = await run(ownerCli, ["status"], { PASEO_HOME: dir });
+  assert.equal(status.status, 0, status.stderr);
+  assert.equal(
+    status.stdout,
+    [
+      "SP-A attempts=1 verdict=green sha=a1b2c3d accepted=no eye=- choke=0/0/0",
+      "SP-B attempts=0 verdict=- sha=- accepted=no eye=- choke=0/0/0",
+    ].join("\n") + "\n",
+    "one line per contracted task, the spawn events read through — the ghost refusal invents nothing",
+  );
+});
+
+test("status is lenient about spawn-event field depth the way it is for choke events — the writer's open-time validation is the shape guard", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const stateDir = join(dir, "plugin-state", "paseo-factory");
+  writeLedger(stateDir, [
+    contractEvent(1, "T1"),
+    { seq: 2, ts, event: "spawn_refused", task: "T1", provider: "claude", arity: 2, rule: "spawn:scope-mandatory" }, // no reason — still readable
+  ]);
+  const result = await run(ownerCli, ["status"], { PASEO_HOME: dir });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "T1 attempts=0 verdict=- sha=- accepted=no eye=- choke=0/0/0\n");
+});

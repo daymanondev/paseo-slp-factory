@@ -6,10 +6,15 @@
  *   factory [--home <paseoHome>] contract --task <id> --workspace <dir> \
  *       --gate <command> --artifact <path> [--scope <p1,p2,...>] [--wait-secs <n>]
  *   factory [--home <paseoHome>] accept <task> --attempt <n> [--wait-secs <n>]
+ *   factory [--home <paseoHome>] run <task> [<task>…] --provider <provider[/model>]
  *   factory [--home <paseoHome>] status
  *
  * contract and accept submit through the spool and wait for the plugin's
- * reply — the CLI never writes the ledger. status is a local, read-only view
+ * reply — the CLI never writes the ledger. run (v0.0.5) is the driver: per
+ * task it submits a `spawn` request through the same spool (the plugin
+ * ledgered `spawn_dispatched`/`spawn_refused` either way), creates the agent
+ * over the daemon's own WebSocket RPC, and watches to verdict — the heavy
+ * half lives in plugin/bin/driver.mjs. status is a local, read-only view
  * of the ledger: one line per task, no plugin needed (it reads the same file
  * the single writer maintains, never touching it).
  *
@@ -38,6 +43,15 @@ commands:
   accept     Accept one green attempt of a task (the Owner's act)
              accept <task> --attempt <n>
 
+  run        Run contracted tasks' agents to verdict (the driver, v0.0.5):
+             one agent per task on the daemon, watched to its verdict.
+             run <task> [<task>…] --provider <provider[/model]>
+             The task count is the parallelism ceiling (no --parallel knob);
+             arity ≥ 2 requires scoped contracts. The driver creates the
+             branch named after the task, submits one spawn request per task
+             through the spool, and exits 0 only when every task ended green
+             with zero refusals.
+
   status     Print one line per task from the ledger — attempts, last verdict,
              attested sha (short), accepted, last fresh-eyes outcome, and the
              task's choke counts (permit asks allowed / denied, git refusals
@@ -53,11 +67,12 @@ const DEFAULT_WAIT_SECS = 60;
 // src/events.ts because the CLIs import no src/ code (ADR 0004). Kept on one
 // line so test/status.test.ts can guard this copy against drift. Kept in sync
 // with the writer by the same suite, the way test/cli.test.ts guards the spool.
-const EVENT_NAMES = ["contract_set", "claim_reported", "gate_started", "gate_finished", "fresh_eyes_written", "report_written", "attempt_accepted", "permit_allowed", "permit_denied", "git_blocked"];
+const EVENT_NAMES = ["contract_set", "claim_reported", "gate_started", "gate_finished", "fresh_eyes_written", "report_written", "attempt_accepted", "permit_allowed", "permit_denied", "git_blocked", "spawn_dispatched", "spawn_refused"];
 // Events without an Attempt number: contract_set owns the Task, the choke
-// events (v0.0.4) belong to the Task's whole life, and git_blocked may carry
-// no task at all (the shim refuses no matter who runs it).
-const NO_ATTEMPT_EVENTS = new Set(["contract_set", "permit_allowed", "permit_denied", "git_blocked"]);
+// events (v0.0.4) belong to the Task's whole life, git_blocked may carry no
+// task at all (the shim refuses no matter who runs it), and the spawn events
+// (v0.0.5) precede any attempt — the plugin records them before an agent exists.
+const NO_ATTEMPT_EVENTS = new Set(["contract_set", "permit_allowed", "permit_denied", "git_blocked", "spawn_dispatched", "spawn_refused"]);
 
 function fail(message) {
   console.error(`factory: ${message}\n\n${usage}`);
@@ -87,7 +102,8 @@ if (command === "--help" || command === "help" || command === undefined) {
   process.exit(command === undefined ? 2 : 0);
 }
 
-const stateDir = stateDirFor(resolveHome(homeFlag));
+const home = resolveHome(homeFlag);
+const stateDir = stateDirFor(home);
 const spoolRoot = spoolRootFor(stateDir);
 
 function parseCommandOptions(spec) {
@@ -173,6 +189,33 @@ if (command === "accept") {
   process.exit(0);
 }
 
+if (command === "run") {
+  const parsed = parseCommandOptions({
+    provider: { type: "string" },
+    "wait-secs": { type: "string" },
+  });
+  const tasks = parsed.positionals;
+  if (tasks.length === 0) fail("run: at least one task id is required (factory run <task> [<task>…] --provider <provider[/model]>)");
+  const provider = parsed.values.provider;
+  if (typeof provider !== "string" || provider.trim() === "") fail("run: --provider <provider[/model]> is required — one provider for every task in the invocation");
+  const seen = new Set();
+  for (const task of tasks) {
+    if (seen.has(task)) fail(`run: task ${task} appears twice — one spawn per task per invocation`);
+    seen.add(task);
+  }
+
+  const { runDriver } = await import("./driver.mjs");
+  const code = await runDriver({
+    home,
+    stateDir,
+    spoolRoot,
+    tasks,
+    provider: provider.trim(),
+    waitSecs: waitSeconds(parsed),
+  });
+  process.exit(code);
+}
+
 if (command === "status") {
   const parsed = parseCommandOptions({});
   if (parsed.positionals.length > 0) fail(`status: unexpected positional "${parsed.positionals[0]}"`);
@@ -240,12 +283,15 @@ function statusLines(events) {
     if (evt.event !== "contract_set" && NO_ATTEMPT_EVENTS.has(evt.event)) {
       // The choke events (v0.0.4) carry no Attempt: they count toward their
       // task's line — a live Contract always precedes them in the ledger — and
-      // an untasked git block counts toward no line at all.
+      // an untasked git block counts toward no line at all. The spawn events
+      // (v0.0.5) ride the ledger as the spawn record itself: validated and read
+      // through, counted toward no field — the driver's output and the ledger
+      // name refusals, the glance does not repeat them.
       const counted = byTask.get(evt.task);
       if (counted !== undefined) {
         if (evt.event === "permit_allowed") counted.allowed += 1;
         else if (evt.event === "permit_denied") counted.denied += 1;
-        else counted.blocked += 1;
+        else if (evt.event === "git_blocked") counted.blocked += 1;
       }
       continue;
     }

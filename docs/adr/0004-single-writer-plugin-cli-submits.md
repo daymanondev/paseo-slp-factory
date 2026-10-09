@@ -17,7 +17,13 @@
   so every gate run is recorded in the ledger rather than silently deduped.
   A cache that returns an old verdict for a re-claimed commit was rejected:
   a red caused by a dirty tree must be re-claimable after cleanup, same sha
-  and all.)*
+  and all.)* *(Amended 2026-10-09, v0.0.5 ticket 03: the Driver CLI
+  (`factory run`) joins the spool — a `spawn` request per task, validated
+  by the plugin (scope-mandatory for parallel runs, workspace overlap
+  against live contracts, task state) and ledgered
+  `spawn_dispatched`/`spawn_refused`; only on ok does the driver create the
+  agent over the daemon's own WebSocket RPC, idempotency-keyed by task id.
+  The one-writer law is unchanged — the driver never writes the ledger.)*
 - **The Agent gets the Claim as a CLI on its `PATH`**, put there by the plugin's
   `agent.session_open` before-hook — not as an MCP tool. It accepts only `--task` and
   `--sha`. *(Amended 2026-10-07, ticket 06: the original wording said `agent.create`;

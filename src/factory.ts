@@ -6,7 +6,7 @@ import { renderReport } from "./report.ts";
 import { loadEyeConfig, runFreshEyesPass } from "./fresh-eyes.ts";
 import { changesOutsideScope, checkCleanAt, headCommitSync, resolveClaimedCommit } from "./workspace.ts";
 import { FactoryError } from "./errors.ts";
-import type { AttemptAccepted, ContractSet, GateFinished, LedgerEvent, Verdict } from "./events.ts";
+import type { AttemptAccepted, ContractSet, GateFinished, LedgerEvent, SpawnDispatched, SpawnRefused, Verdict } from "./events.ts";
 import type { GateResult } from "./gate.ts";
 
 /** Task ids become report filenames, so they stay flat and filename-safe. */
@@ -65,6 +65,27 @@ export interface AcceptInput {
   attempt: number;
 }
 
+export interface SpawnInput {
+  task: string;
+  /** The `provider[/model]` string the driver runs the agent under — recorded, never interpreted. */
+  provider: string;
+  /**
+   * How many tasks the driver's invocation carries — arity is the run's
+   * parallel width, and scope is mandatory from two up (map decision 3).
+   */
+  arity: number;
+}
+
+/**
+ * One spawn request, judged: dispatched means the driver may create the
+ * agent; refused names the rule that fired. Either way exactly one ledger
+ * line exists after this call — a refused spawn is a recorded fact, not a
+ * CLI complaint (v0.0.5, ADR 0004 amendment).
+ */
+export type SpawnDecision =
+  | { outcome: "dispatched"; event: SpawnDispatched }
+  | { outcome: "refused"; event: SpawnRefused; code: string };
+
 export interface Factory {
   readonly ledger: Ledger;
   readonly stateDir: string;
@@ -87,6 +108,15 @@ export interface Factory {
    * never the Agent's.
    */
   accept(input: AcceptInput): AttemptAccepted;
+  /**
+   * Judges a driver's spawn request (v0.0.5): the task must be known,
+   * unaccepted, scoped when the invocation runs parallel (arity ≥ 2), and its
+   * workspace clear of every other live Contract's tree. One ledger line
+   * either way — `spawn_dispatched` or `spawn_refused` — so the record exists
+   * before any agent does. Never throws; the refusal rides the return value
+   * (and the spool reply), not an exception.
+   */
+  requestSpawn(input: SpawnInput): SpawnDecision;
   /**
    * The live Contract whose workspace contains `cwd`, if any — the choke's
    * mechanical "contracted agent" test (v0.0.4 map decision 5: asks from
@@ -171,6 +201,18 @@ export function createFactory(options: FactoryOptions): Factory {
           `contract already set for task ${task}; the ledger is append-only — use a new task id`,
         );
       }
+      // The one concurrency guard the audit demanded (H1/H2, v0.0.5 ticket 02):
+      // two live Contracts may never share a workspace tree — equals, nests, or
+      // contains. Without this, two gates race in one cwd and permit asks
+      // misattribute to the latest covering Contract. It is also the Owner-CLI
+      // arm of the driver's spawn-time workspace refusal (ticket 03 §7).
+      const conflict = liveWorkspaceConflict(ledger, workspace, task);
+      if (conflict !== undefined) {
+        throw new FactoryError(
+          "workspace-conflict",
+          `workspace "${workspace}" ${relationText(conflict.relation)} the live contract of task ${conflict.task} (${conflict.workspace}) — accept or retire that task before contracting this tree`,
+        );
+      }
       return ledger.append({
         event: "contract_set",
         task,
@@ -188,6 +230,16 @@ export function createFactory(options: FactoryOptions): Factory {
       const contract = this.contractFor(task);
       if (!contract) throw new FactoryError("unknown-task", `no contract set for task ${task} — register one first`);
       const history = ledger.eventsFor(task);
+
+      // H6 rider (v0.0.5 ticket 02): an accepted task is closed — a Claim on it
+      // used to fall through to a fresh Attempt; it refuses like accept does.
+      const priorAccept = acceptedAttempt(history);
+      if (priorAccept !== undefined) {
+        throw new FactoryError(
+          "already-accepted",
+          `task ${task} was already accepted at attempt ${priorAccept.attempt}; the ledger is append-only`,
+        );
+      }
 
       // ADR 0003: Attempts never overlap. The previous one must have reached
       // its report before a new Claim opens the next Attempt.
@@ -328,8 +380,8 @@ export function createFactory(options: FactoryOptions): Factory {
       if (events.length === 0) {
         throw new FactoryError("unknown-attempt", `task ${task} has no attempt ${attempt}`);
       }
-      const priorAccept = history.findLast((e): e is AttemptAccepted => e.event === "attempt_accepted");
-      if (priorAccept) {
+      const priorAccept = acceptedAttempt(history);
+      if (priorAccept !== undefined) {
         throw new FactoryError(
           "already-accepted",
           `task ${task} was already accepted at attempt ${priorAccept.attempt}; the ledger is append-only`,
@@ -345,11 +397,66 @@ export function createFactory(options: FactoryOptions): Factory {
       return ledger.append({ event: "attempt_accepted", task, attempt });
     },
 
-    liveContractFor(cwd) {
-      const accepted = new Set<string>();
-      for (const evt of ledger.events) {
-        if (evt.event === "attempt_accepted") accepted.add(evt.task);
+    requestSpawn({ task, provider, arity }) {
+      const base = { task, provider, arity };
+      // Two spellings of one refusal on purpose: `code` is dash-style for the
+      // spool reply (the FactoryError convention), `rule` is colon-style for
+      // the ledger line (the choke's `policy:S1-…` / `git:…` convention).
+      const refuse = (code: string, rule: string, reason: string): SpawnDecision => ({
+        outcome: "refused",
+        code,
+        event: ledger.append({ ...base, event: "spawn_refused", rule, reason }),
+      });
+      // Validation order follows ticket 03 §3's list; every refusal is one
+      // ledger line, never a thrown error — the driver hears a reply, the
+      // ledger hears the fact.
+      if (!Number.isInteger(arity) || arity < 1 || provider.trim() === "") {
+        return refuse(
+          "invalid-spawn",
+          "spawn:invalid-request",
+          `spawn request for task ${JSON.stringify(task)} is malformed — arity must be a positive integer and provider a non-empty string`,
+        );
       }
+      if (!TASK_ID_PATTERN.test(task)) {
+        return refuse(
+          "invalid-task",
+          "spawn:invalid-task",
+          `task id "${task}" is invalid — use letters, digits, ".", "_", "-"`,
+        );
+      }
+      const contract = this.contractFor(task);
+      if (!contract) {
+        return refuse("unknown-task", "spawn:unknown-task", `no contract set for task ${task} — register one first`);
+      }
+      const history = ledger.eventsFor(task);
+      const priorAccept = acceptedAttempt(history);
+      if (priorAccept !== undefined) {
+        return refuse(
+          "already-accepted",
+          "spawn:accepted-task",
+          `task ${task} was already accepted at attempt ${priorAccept.attempt} — the task is closed`,
+        );
+      }
+      if (arity >= 2 && (contract.scope === undefined || contract.scope.length === 0)) {
+        return refuse(
+          "spawn-scope-mandatory",
+          "spawn:scope-mandatory",
+          `task ${task} has no scope — contracts must be scoped to run in parallel (this invocation carries ${arity} tasks)`,
+        );
+      }
+      const conflict = liveWorkspaceConflict(ledger, contract.workspace, task);
+      if (conflict !== undefined) {
+        return refuse(
+          "workspace-conflict",
+          "spawn:workspace-conflict",
+          `workspace "${contract.workspace}" of task ${task} ${relationText(conflict.relation)} the live contract of task ${conflict.task} (${conflict.workspace})`,
+        );
+      }
+      return { outcome: "dispatched", event: ledger.append({ ...base, event: "spawn_dispatched" }) };
+    },
+
+    liveContractFor(cwd) {
+      const accepted = acceptedTasks(ledger);
       let match: ContractSet | undefined;
       for (const evt of ledger.events) {
         if (evt.event === "contract_set" && !accepted.has(evt.task) && covers(evt, cwd)) match = evt;
@@ -366,6 +473,61 @@ export function createFactory(options: FactoryOptions): Factory {
 /** A Contract covers a cwd when the cwd is the workspace or sits inside it. */
 function covers(contract: ContractSet, cwd: string): boolean {
   return cwd === contract.workspace || cwd.startsWith(`${contract.workspace}/`);
+}
+
+/** The task's acceptance, when the Owner has accepted — the closed-marker every closer reads. */
+function acceptedAttempt(history: readonly LedgerEvent[]): AttemptAccepted | undefined {
+  return history.findLast((e): e is AttemptAccepted => e.event === "attempt_accepted");
+}
+
+/** Every task with an accepted Attempt — acceptance retires a Contract (live = set and unaccepted). */
+function acceptedTasks(ledger: Ledger): Set<string> {
+  const accepted = new Set<string>();
+  for (const evt of ledger.events) {
+    if (evt.event === "attempt_accepted") accepted.add(evt.task);
+  }
+  return accepted;
+}
+
+/** How one workspace relates to another — the workspace-conflict key (v0.0.5). */
+type WorkspaceRelation = "equal" | "inside" | "contains";
+
+/** One line of English for a relation — the error and the refusal share it. */
+function relationText(relation: WorkspaceRelation): string {
+  if (relation === "equal") return "is the same tree as";
+  if (relation === "inside") return "sits inside";
+  return "contains";
+}
+
+/**
+ * The live-Contract workspace scan (H1/H2 guard): finds the first live
+ * Contract — set, not accepted, another task — whose workspace equals, nests
+ * inside, or contains `workspace`. Comparison is on the paths as contracted
+ * (absolute, `resolve`d by the CLI); trailing slashes are tolerated, symlink
+ * aliasing is not — the Owner contracts one spelling of a tree per run.
+ */
+function liveWorkspaceConflict(
+  ledger: Ledger,
+  workspace: string,
+  task: string,
+): { task: string; workspace: string; relation: WorkspaceRelation } | undefined {
+  const mine = normalized(workspace);
+  const accepted = acceptedTasks(ledger);
+  for (const evt of ledger.events) {
+    if (evt.event !== "contract_set" || evt.task === task || accepted.has(evt.task)) continue;
+    const theirs = normalized(evt.workspace);
+    let relation: WorkspaceRelation | undefined;
+    if (mine === theirs) relation = "equal";
+    else if (mine.startsWith(`${theirs}/`)) relation = "inside";
+    else if (theirs.startsWith(`${mine}/`)) relation = "contains";
+    if (relation !== undefined) return { task: evt.task, workspace: evt.workspace, relation };
+  }
+  return undefined;
+}
+
+/** Workspace paths as contracted, with a tolerated trailing slash gone. */
+function normalized(path: string): string {
+  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
 }
 
 /**

@@ -219,3 +219,24 @@ test("the loop with --fresh-eyes: the eye's line lands through the real CLIs and
   assert.ok(report.includes("- Fresh eyes (`fake-eye-1`) — CLEAR: the fix matches the contract; nothing to add."));
   assert.ok(existsSync(join(stateDir, "gate-LOOP2-2.log")), "the full gate output is persisted (ticket 02a)");
 });
+
+test("factory run refuses bad usage before touching the spool or the daemon", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const home = join(dir, "paseo-home");
+
+  const noTasks = await run(ownerCli, ["run", "--provider", "claude"], { PASEO_HOME: home });
+  assert.equal(noTasks.status, 2);
+  assert.match(noTasks.stderr, /run: at least one task id is required/);
+
+  const noProvider = await run(ownerCli, ["run", "T1"], { PASEO_HOME: home });
+  assert.equal(noProvider.status, 2);
+  assert.match(noProvider.stderr, /--provider <provider\[\/model\]> is required/);
+
+  const dup = await run(ownerCli, ["run", "T1", "T1", "--provider", "claude"], { PASEO_HOME: home });
+  assert.equal(dup.status, 2);
+  assert.match(dup.stderr, /task T1 appears twice/);
+
+  const stateDir = join(home, "plugin-state", "paseo-factory");
+  assert.ok(!existsSync(join(stateDir, "spool", "requests")), "no request was submitted for refused usage");
+});
