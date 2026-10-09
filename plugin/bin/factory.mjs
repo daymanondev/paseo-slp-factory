@@ -39,8 +39,9 @@ commands:
              accept <task> --attempt <n>
 
   status     Print one line per task from the ledger — attempts, last verdict,
-             attested sha (short), accepted, last fresh-eyes outcome. A local
-             read; the plugin need not be running.
+             attested sha (short), accepted, last fresh-eyes outcome, and the
+             task's choke counts (permit asks allowed / denied, git refusals
+             bound to the task). A local read; the plugin need not be running.
 
 options:
   --home <paseoHome>   daemon home (default: $PASEO_HOME or ~/.paseo)
@@ -236,10 +237,21 @@ function statusLines(events) {
   const order = [];
   const byTask = new Map();
   for (const evt of events) {
-    if (evt.event !== "contract_set" && NO_ATTEMPT_EVENTS.has(evt.event)) continue; // choke events carry no Attempt; untasked git blocks have no line at all
+    if (evt.event !== "contract_set" && NO_ATTEMPT_EVENTS.has(evt.event)) {
+      // The choke events (v0.0.4) carry no Attempt: they count toward their
+      // task's line — a live Contract always precedes them in the ledger — and
+      // an untasked git block counts toward no line at all.
+      const counted = byTask.get(evt.task);
+      if (counted !== undefined) {
+        if (evt.event === "permit_allowed") counted.allowed += 1;
+        else if (evt.event === "permit_denied") counted.denied += 1;
+        else counted.blocked += 1;
+      }
+      continue;
+    }
     let state = byTask.get(evt.task);
     if (state === undefined) {
-      state = { attempts: 0, verdict: undefined, sha: undefined, eye: undefined, accepted: false };
+      state = { attempts: 0, verdict: undefined, sha: undefined, eye: undefined, accepted: false, allowed: 0, denied: 0, blocked: 0 };
       byTask.set(evt.task, state);
       order.push(evt.task);
     }
@@ -256,7 +268,7 @@ function statusLines(events) {
   }
   return order.map((task) => {
     const s = byTask.get(task);
-    return `${task} attempts=${s.attempts} verdict=${s.verdict ?? "-"} sha=${s.sha ?? "-"} accepted=${s.accepted ? "yes" : "no"} eye=${s.eye ?? "-"}`;
+    return `${task} attempts=${s.attempts} verdict=${s.verdict ?? "-"} sha=${s.sha ?? "-"} accepted=${s.accepted ? "yes" : "no"} eye=${s.eye ?? "-"} choke=${s.allowed}/${s.denied}/${s.blocked}`;
   });
 }
 
