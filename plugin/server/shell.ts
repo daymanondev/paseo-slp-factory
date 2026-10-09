@@ -8,13 +8,15 @@
  * for create, resume, refresh and import alike — while `env` set only at
  * `agent.create` is not re-applied on resume. One hook, every launch.
  *
- * The PATH entry points at `<stateDir>/bin`, which holds a generated wrapper
- * (not the plugin's own `bin/`): the wrapper execs the daemon's node binary
- * explicitly, so the CLI works even under desktop-app daemons whose PATH has
- * no `node`.
+ * The PATH entry points at `<stateDir>/bin`, which holds generated wrappers
+ * (not the plugin's own `bin/`): each wrapper execs the daemon's node binary
+ * explicitly, so the tool works even under desktop-app daemons whose PATH has
+ * no `node`. Since v0.0.4 the same dir also holds the `git` shim — the
+ * exec-time net for PATH-resolved dangerous git (the ask-time net is the
+ * choke in `plugin/server/choke.ts`).
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 
 /** Where the generated `factory-claim` wrapper lives. */
@@ -47,15 +49,38 @@ function shellQuote(value: string): string {
  * component dies silently).
  */
 export function ensureClaimCli(stateDir: string, pluginDir: string, nodeBinary: string): void {
-  const binDir = claimCliBinDir(stateDir);
+  ensureGeneratedWrapper({
+    target: join(claimCliBinDir(stateDir), "factory-claim"),
+    script: join(pluginDir, "bin", "factory-claim.mjs"),
+    stateDir,
+    nodeBinary,
+  });
+}
+
+/**
+ * (Re)generate `<stateDir>/bin/git` — the v0.0.4 git shim (same hook-injected
+ * dir, same wrapper mechanics as the claim CLI). The shim wins over everything
+ * the agent exports on PATH, so a PATH-resolved dangerous git dies at exec
+ * time; absolute-path invocations are the policy layer's business (the two
+ * nets compose). Everything benign passes through to the real git untouched.
+ */
+export function ensureGitShim(stateDir: string, pluginDir: string, nodeBinary: string): void {
+  ensureGeneratedWrapper({
+    target: join(claimCliBinDir(stateDir), "git"),
+    script: join(pluginDir, "bin", "git-shim.mjs"),
+    stateDir,
+    nodeBinary,
+  });
+}
+
+function ensureGeneratedWrapper(input: { target: string; script: string; stateDir: string; nodeBinary: string }): void {
+  const binDir = dirname(input.target);
   mkdirSync(binDir, { recursive: true });
-  const target = join(binDir, "factory-claim");
-  const script = join(pluginDir, "bin", "factory-claim.mjs");
   const body =
     `#!/bin/sh\n` +
-    `ELECTRON_RUN_AS_NODE=1 FACTORY_STATE_DIR=${shellQuote(stateDir)} ` +
-    `exec ${shellQuote(nodeBinary)} ${shellQuote(script)} "$@"\n`;
-  if (existsSync(target) && readFileSync(target, "utf8") === body) return;
-  writeFileSync(target, body);
-  chmodSync(target, 0o755);
+    `ELECTRON_RUN_AS_NODE=1 FACTORY_STATE_DIR=${shellQuote(input.stateDir)} ` +
+    `exec ${shellQuote(input.nodeBinary)} ${shellQuote(input.script)} "$@"\n`;
+  if (existsSync(input.target) && readFileSync(input.target, "utf8") === body) return;
+  writeFileSync(input.target, body);
+  chmodSync(input.target, 0o755);
 }

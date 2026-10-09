@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pluginDirFor, resolvePaseoHome, stateDirFor } from "../plugin/server/paths.ts";
-import { claimCliBinDir, ensureClaimCli, injectClaimCliPath } from "../plugin/server/shell.ts";
+import { claimCliBinDir, ensureClaimCli, ensureGitShim, injectClaimCliPath } from "../plugin/server/shell.ts";
 import { Ledger } from "../plugin/server/core/ledger.ts";
 import { disposeDir, makeTempDir, repoRoot } from "./helpers.ts";
 import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
@@ -134,4 +134,26 @@ test("plugin/server/core is a byte-exact copy of src/ (run npm run sync:plugin-c
       `plugin/server/core/${name} differs from src/${name}`,
     );
   }
+});
+
+test("ensureGitShim generates the git wrapper beside factory-claim, rewriting only on change", (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const stateDir = join(dir, "state");
+  const pluginDir = join(repoRoot, "plugin");
+
+  ensureGitShim(stateDir, pluginDir, "/daemon/node");
+  const target = join(claimCliBinDir(stateDir), "git");
+  const body = readFileSync(target, "utf8");
+  assert.match(body, /^#!\/bin\/sh/);
+  assert.match(body, /FACTORY_STATE_DIR=/);
+  assert.match(body, /git-shim\.mjs/);
+  assert.equal(statSync(target).mode & 0o111, 0o111, "executable");
+
+  const mtimeBefore = statSync(target).mtimeMs;
+  ensureGitShim(stateDir, pluginDir, "/daemon/node");
+  assert.equal(statSync(target).mtimeMs, mtimeBefore, "unchanged content is not rewritten");
+
+  ensureGitShim(stateDir, pluginDir, "/daemon/node-v2");
+  assert.match(readFileSync(target, "utf8"), /daemon\/node-v2/, "a moved node binary moves the wrapper");
 });

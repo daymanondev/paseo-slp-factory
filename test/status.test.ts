@@ -267,3 +267,31 @@ test("a read error that is not a missing file is reported, not swallowed", async
   assert.match(result.stderr, /cannot read/);
   assert.doesNotMatch(result.stderr, /no tasks yet/);
 });
+
+test("status reads a ledger holding choke events — task lines unchanged, untasked git blocks invisible", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const workspace = join(dir, "ws");
+  copyFixture("sample-workspace", workspace);
+  gitCommitAll(workspace);
+  const home = join(dir, "paseo-home");
+  const stateDir = join(home, "plugin-state", "paseo-factory");
+
+  const ts = "2026-10-09T09:00:00.000Z";
+  const events = [
+    { seq: 1, ts, event: "contract_set", task: "T1", workspace, gate: "true", artifact: "src/format.ts" },
+    { seq: 2, ts, event: "claim_reported", task: "T1", attempt: 1, sha: "abc" },
+    { seq: 3, ts, event: "gate_started", task: "T1", attempt: 1, cmd: "true" },
+    { seq: 4, ts, event: "gate_finished", task: "T1", attempt: 1, exit: 0, verdict: "green", note: "ok", sha: "abc1234567890abcdef4567890abcdef4567890" },
+    { seq: 5, ts, event: "report_written", task: "T1", attempt: 1, path: "factory/report-T1-1.md" },
+    { seq: 6, ts, event: "permit_allowed", task: "T1", agent: "ag1", name: "Bash", kind: "tool", command: "npm test" },
+    { seq: 7, ts, event: "permit_denied", task: "T1", agent: "ag1", name: "Bash", kind: "tool", command: "git push --force", rule: "policy:S1-git-vocabulary", reason: "r" },
+    { seq: 8, ts, event: "git_blocked", command: "git clean -fd", rule: "git:clean-force", reason: "r", cwd: "/elsewhere", blockId: "b1" },
+  ];
+  writeLedger(stateDir, events);
+
+  const result = await run(ownerCli, ["--home", home, "status"], { PASEO_HOME: home });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trimEnd(), "T1 attempts=1 verdict=green sha=abc1234 accepted=no eye=-");
+  assert.ok(!result.stdout.includes("undefined"), "the untasked git_blocked never invents a task line");
+});

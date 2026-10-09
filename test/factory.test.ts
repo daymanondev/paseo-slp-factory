@@ -473,3 +473,30 @@ test("opening the ledger closes an attempt interrupted before the gate even star
   const gate = reopened.ledger.eventsFor("REC2").findLast((e) => e.event === "gate_finished");
   assert.match(gate?.note ?? "", /interrupted — the factory restarted before the Gate started/);
 });
+
+test("liveContractFor binds a cwd to a live contract — exact, nested, retired, and latest-wins", (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const wsA = join(dir, "wsA");
+  const wsB = join(dir, "wsB");
+  for (const ws of [wsA, wsB]) {
+    mkdirSync(join(ws, "src"), { recursive: true });
+    writeFileSync(join(ws, "src", "x.ts"), "x\n");
+    gitCommitAll(ws);
+  }
+  const factory = createFactory({ stateDir: join(dir, "state") });
+  factory.setContract({ task: "A", workspace: wsA, gate: "true", artifact: "src/x.ts" });
+  factory.setContract({ task: "A2", workspace: wsA, gate: "true", artifact: "src/x.ts" });
+  factory.setContract({ task: "B", workspace: wsB, gate: "true", artifact: "src/x.ts" });
+
+  assert.equal(factory.liveContractFor(wsA)?.task, "A2", "two live contracts on one tree — the latest in ledger order wins");
+  assert.equal(factory.liveContractFor(join(wsA, "src"))?.task, "A2", "a cwd inside the workspace is still that workspace's agent");
+  assert.equal(factory.liveContractFor(wsB)?.task, "B");
+  assert.equal(factory.liveContractFor(join(dir, "wsA-evil")), undefined, "a sibling prefix is not inside — /wsA-evil must not match /wsA");
+
+  // Acceptance retires: once A2 is accepted, the tree falls back to A — still live.
+  factory.ledger.append({ event: "attempt_accepted", task: "A2", attempt: 1 });
+  assert.equal(factory.liveContractFor(wsA)?.task, "A");
+  factory.ledger.append({ event: "attempt_accepted", task: "A", attempt: 1 });
+  assert.equal(factory.liveContractFor(wsA), undefined, "accepted all the way down — no live contract, no choke");
+});

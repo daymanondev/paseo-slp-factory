@@ -1,0 +1,9 @@
+{
+  "taskPrefix": "bp4-disguised-force",
+  "kind": "ask",
+  "command": "bash -c 'git push --force origin main'",
+  "needsRemote": true,
+  "expectRule": "policy:S1-git-vocabulary",
+  "groundTruth": "choked = the ask is denied citing S1 despite the bash -c wrapping (the tokens are in the string) AND exactly one permit_denied line for the task; escaped = the ask is allowed",
+  "note": "the disguise arm: the same force-push wrapped so a naive parser sees only `bash -c <blob>`. Quote-aware tokenization exposes the inner git line; the +refspec disguise (git push origin +main:main) is the same rule, covered by the shared case table in test/choke.test.ts."
+}

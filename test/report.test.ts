@@ -109,3 +109,31 @@ test("refuses to render when the attempt history is incomplete", () => {
     factoryErrorCode("incomplete-history"),
   );
 });
+
+test("renders the task-wide choke section: counts, one line per deny and git block, never per allow", () => {
+  const events: LedgerEvent[] = [
+    { seq: 1, ts: "2026-10-01T08:59:00.000Z", event: "contract_set", task: "T7", workspace: "/ws/a", gate: "npm test", artifact: "src/x.ts" },
+    { seq: 2, ts: "2026-10-01T09:00:00.000Z", event: "permit_allowed", task: "T7", agent: "ag1", name: "Bash", kind: "tool", command: "npm test" },
+    { seq: 3, ts: "2026-10-01T09:00:01.000Z", event: "permit_allowed", task: "T7", agent: "ag1", name: "Bash", kind: "tool", command: "git status" },
+    { seq: 4, ts: "2026-10-01T09:00:02.000Z", event: "permit_denied", task: "T7", agent: "ag1", name: "Bash", kind: "tool", command: "git push --force origin main", rule: "policy:S1-git-vocabulary", reason: "r" },
+    { seq: 5, ts: "2026-10-01T09:00:03.000Z", event: "git_blocked", task: "T7", agent: "ag1", command: "git reset --hard", rule: "git:reset-hard", reason: "r", cwd: "/ws/a", blockId: "b1" },
+    { seq: 6, ts: "2026-10-01T09:01:00.000Z", event: "claim_reported", task: "T7", attempt: 1, sha: "aaa" },
+    { seq: 7, ts: "2026-10-01T09:01:01.000Z", event: "gate_started", task: "T7", attempt: 1, cmd: "npm test" },
+    { seq: 8, ts: "2026-10-01T09:01:30.000Z", event: "gate_finished", task: "T7", attempt: 1, exit: 0, verdict: "green", note: "ok", sha: "feed1234567890abcdef4567890abcdef4567890" },
+    { seq: 9, ts: "2026-10-01T09:01:31.000Z", event: "report_written", task: "T7", attempt: 1, path: "factory/report-T7-1.md" },
+    // Another task's choke events must not leak into this report.
+    { seq: 10, ts: "2026-10-01T09:02:00.000Z", event: "permit_denied", task: "T8", agent: "ag2", name: "Bash", kind: "tool", command: "rm -rf /", rule: "policy:S2-outside-writable", reason: "r" },
+    // An untasked git block (the shim refuses no matter who runs it) has no task to render under.
+    { seq: 11, ts: "2026-10-01T09:02:01.000Z", event: "git_blocked", command: "git clean -fd", rule: "git:clean-force", reason: "r", cwd: "/elsewhere", blockId: "b2" },
+  ];
+  const report = renderReport("T7", 1, events);
+  assert.ok(report.includes("- Choke (task-wide): 2 asks allowed, 1 denied, 1 git blocked"));
+  assert.ok(report.includes("  - denied @ 2026-10-01 09:00 UTC: `git push --force origin main` — policy:S1-git-vocabulary"));
+  assert.ok(report.includes("  - git blocked @ 2026-10-01 09:00 UTC: `git reset --hard` — git:reset-hard"));
+  assert.ok(!report.includes("T8"), "another task's choke lines stay out");
+  assert.ok(!report.includes("clean -fd"), "untasked git blocks stay out");
+  assert.ok(!report.includes("npm test\" — permit"), "allows are counted, never listed");
+
+  const clean = renderReport("T7", 1, events.filter((e) => e.event !== "permit_allowed" && e.event !== "permit_denied" && e.event !== "git_blocked"));
+  assert.ok(!clean.includes("Choke"), "no judged asks, no choke section");
+});

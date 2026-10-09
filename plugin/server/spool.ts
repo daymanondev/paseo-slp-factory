@@ -53,7 +53,27 @@ export interface AcceptRequest {
   attempt: number;
 }
 
-export type SpoolRequest = ContractRequest | ClaimRequest | AcceptRequest;
+/**
+ * A synthetic permit ask (v0.0.4) — the bypass battery's vehicle into the real
+ * choke: the same policy, the same ledger lines, answered in the reply instead
+ * of `respondToPermission()` because no daemon ask exists to answer. The task
+ * must carry a live Contract covering `cwd` (default: the Contract's own
+ * workspace) — the choke judges contracted work only.
+ */
+export interface AskRequest {
+  id: string;
+  kind: "ask";
+  task: string;
+  command: string;
+  cwd?: string;
+  agent?: string;
+  name?: string;
+}
+
+export type SpoolRequest = ContractRequest | ClaimRequest | AcceptRequest | AskRequest;
+
+/** Handles a synthetic ask — `createChoke(...).spoolAskHandler` is the implementation. */
+export type AskHandler = (request: AskRequest) => SpoolReply;
 
 export type SpoolReply =
   | {
@@ -66,6 +86,10 @@ export type SpoolReply =
       reportPath?: string;
       /** The gate note — the agent's actionable feedback on a red verdict. */
       note?: string;
+      /** Ask replies: the choke's answer. A denial is a processed ask, not an error. */
+      decision?: "allowed" | "denied";
+      rule?: string;
+      reason?: string;
     }
   | { id: string; ok: false; code: string; message: string };
 
@@ -109,15 +133,36 @@ export function parseSpoolRequest(body: unknown): SpoolRequest | undefined {
     if (typeof req.task !== "string" || typeof req.attempt !== "number" || !Number.isInteger(req.attempt)) return undefined;
     return { id: req.id, kind: "accept", task: req.task, attempt: req.attempt };
   }
+  if (req.kind === "ask") {
+    if (typeof req.task !== "string" || typeof req.command !== "string" || req.command.trim() === "") return undefined;
+    for (const field of ["cwd", "agent", "name"] as const) {
+      if (req[field] !== undefined && typeof req[field] !== "string") return undefined;
+    }
+    return {
+      id: req.id,
+      kind: "ask",
+      task: req.task,
+      command: req.command,
+      ...(req.cwd === undefined ? {} : { cwd: req.cwd as string }),
+      ...(req.agent === undefined ? {} : { agent: req.agent as string }),
+      ...(req.name === undefined ? {} : { name: req.name as string }),
+    };
+  }
   return undefined;
 }
 
 /**
  * Runs one request through the factory — the single place a spool request
  * becomes Ledger events or a Gate run. Never throws: every failure becomes a
- * red-flagged reply, so the waiting CLI always hears something.
+ * red-flagged reply, so the waiting CLI always hears something. `ask` requests
+ * need the choke's handler (the shell passes `createChoke(...).spoolAskHandler`);
+ * without one they are refused loudly, never silently allowed.
  */
-export async function handleSpoolRequest(factory: Factory, request: SpoolRequest): Promise<SpoolReply> {
+export async function handleSpoolRequest(
+  factory: Factory,
+  request: SpoolRequest,
+  askHandler?: AskHandler,
+): Promise<SpoolReply> {
   try {
     if (request.kind === "contract") {
       factory.setContract({
@@ -146,6 +191,17 @@ export async function handleSpoolRequest(factory: Factory, request: SpoolRequest
         note: outcome.gate.note,
       };
     }
+    if (request.kind === "ask") {
+      if (askHandler === undefined) {
+        return {
+          id: request.id,
+          ok: false,
+          code: "ask-unavailable",
+          message: "this daemon's factory plugin does not judge synthetic asks — update the plugin to v0.0.4+",
+        };
+      }
+      return askHandler(request);
+    }
     factory.accept({ task: request.task, attempt: request.attempt });
     return { id: request.id, ok: true, summary: `task ${request.task} accepted at attempt ${request.attempt}` };
   } catch (err) {
@@ -166,6 +222,8 @@ export interface SpoolOptions {
   onLog?: (message: string) => void;
   /** Reply poll cadence for the drain loop. Default 250ms. */
   pollMs?: number;
+  /** The choke's synthetic-ask handler (v0.0.4); without it `ask` requests are refused. */
+  ask?: AskHandler;
 }
 
 export interface Spool {
@@ -204,7 +262,7 @@ export function startSpool(stateDir: string, factory: Factory, options: SpoolOpt
         continue;
       }
       inFlight.add(id);
-      void handleRequestFile(id, requestPath, replyPath, join(processedDir, name), factory, log)
+      void handleRequestFile(id, requestPath, replyPath, join(processedDir, name), factory, log, options.ask)
         .catch(() => {})
         .finally(() => inFlight.delete(id));
     }
@@ -226,6 +284,7 @@ async function handleRequestFile(
   processedPath: string,
   factory: Factory,
   log: (message: string) => void,
+  askHandler?: AskHandler,
 ): Promise<void> {
   let reply: SpoolReply;
   let request: SpoolRequest | undefined;
@@ -238,11 +297,11 @@ async function handleRequestFile(
     reply = { id, ok: false, code: "bad-request", message: `request file ${requestPath} is not a valid spool request` };
     log(`request ${id}: REJECTED — malformed`);
   } else {
-    reply = await handleSpoolRequest(factory, request);
+    reply = await handleSpoolRequest(factory, request, askHandler);
     log(
       request.kind === "claim" && reply.ok
         ? `request ${id}: claim ${request.task} by ${request.agent ?? "unknown agent"} → attempt ${reply.attempt} ${reply.verdict}`
-        : `request ${id}: ${request.kind} ${request.task} → ${reply.ok ? "ok" : `rejected (${reply.code})`}`,
+        : `request ${id}: ${request.kind} ${request.task} → ${reply.ok ? (reply.decision ?? "ok") : `rejected (${reply.code})`}`,
     );
   }
   writeJsonAtomic(replyPath, reply);

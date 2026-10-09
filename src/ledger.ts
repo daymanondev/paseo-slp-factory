@@ -70,9 +70,8 @@ export class Ledger {
           (evt as { seq: number }).seq > prevSeq &&
           typeof (evt as { event?: unknown }).event === "string" &&
           (EVENT_NAMES as readonly string[]).includes((evt as { event: string }).event) &&
-          typeof (evt as { task?: unknown }).task === "string" &&
           typeof (evt as { ts?: unknown }).ts === "string" &&
-          attemptIsValid(evt);
+          shapeIsValid(evt);
         if (!valid) {
           throw new FactoryError("corrupted-ledger", `line ${i + 1} of ${path} is not a valid ledger event`);
         }
@@ -115,11 +114,32 @@ export class Ledger {
   }
 }
 
-/** Post-Contract events carry an Attempt number, a positive integer (ADR 0003). */
-function attemptIsValid(evt: LedgerEvent): boolean {
-  if (evt.event === "contract_set") return true;
-  const attempt = (evt as { attempt?: unknown }).attempt;
-  return typeof attempt === "number" && Number.isInteger(attempt) && attempt >= 1;
+/**
+ * Per-event required shape. The attempt-scoped loop (ADR 0003) carries a
+ * positive-integer Attempt on every post-Contract event; the v0.0.4 choke
+ * events carry none — permit events need their task and agent, `git_blocked`
+ * needs its command/rule/cwd/blockId and may lack a task entirely (the shim
+ * refuses no matter who runs it, bindable or not).
+ */
+function shapeIsValid(evt: LedgerEvent): boolean {
+  const asRecord = evt as unknown as Record<string, unknown>;
+  const taskIsString = typeof asRecord.task === "string";
+  if (evt.event === "contract_set") return taskIsString;
+  if (evt.event === "permit_allowed" || evt.event === "permit_denied") {
+    return taskIsString && typeof asRecord.agent === "string" && (evt.event === "permit_allowed" || typeof asRecord.rule === "string");
+  }
+  if (evt.event === "git_blocked") {
+    return (
+      (asRecord.task === undefined || taskIsString) &&
+      (asRecord.agent === undefined || typeof asRecord.agent === "string") &&
+      typeof asRecord.command === "string" &&
+      typeof asRecord.rule === "string" &&
+      typeof asRecord.cwd === "string" &&
+      typeof asRecord.blockId === "string"
+    );
+  }
+  const attempt = asRecord.attempt;
+  return taskIsString && typeof attempt === "number" && Number.isInteger(attempt) && attempt >= 1;
 }
 
 /**

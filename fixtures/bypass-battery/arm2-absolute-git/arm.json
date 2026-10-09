@@ -1,0 +1,9 @@
+{
+  "taskPrefix": "bp2-abs-git",
+  "kind": "ask",
+  "command": "/usr/bin/git push --force origin main",
+  "needsRemote": true,
+  "expectRule": "policy:S1-git-vocabulary",
+  "groundTruth": "choked = the ask is denied citing S1 (the /usr/bin/git spelling carries the force-push vocabulary) AND exactly one permit_denied line for the task; escaped = the ask is allowed",
+  "note": "the absolute-path arm: /usr/bin/git sidesteps the shim entirely (PATH never resolves it), so the ask-time policy layer is the only net — S1 tokenizes the command string and judges any git spelling."
+}

@@ -155,3 +155,52 @@ test("a replayed request with an existing reply runs nothing a second time (ADR 
   });
   assert.equal(factory.ledger.events.length, 1, "no second contract event — no second anything");
 });
+
+test("parseSpoolRequest accepts the synthetic-ask shape and nothing around it", () => {
+  assert.deepEqual(parseSpoolRequest({ id: "r1", kind: "ask", task: "T1", command: "git push --force" }), {
+    id: "r1",
+    kind: "ask",
+    task: "T1",
+    command: "git push --force",
+  });
+  assert.deepEqual(
+    parseSpoolRequest({ id: "r1", kind: "ask", task: "T1", command: "x", cwd: "/w", agent: "battery", name: "Bash" }),
+    { id: "r1", kind: "ask", task: "T1", command: "x", cwd: "/w", agent: "battery", name: "Bash" },
+  );
+  for (const bad of [
+    { id: "r1", kind: "ask", task: "T1" },
+    { id: "r1", kind: "ask", task: "T1", command: "  " },
+    { id: "r1", kind: "ask", task: "T1", command: "x", cwd: 7 },
+    { id: "r1", kind: "ask", task: "T1", command: "x", agent: true },
+  ]) {
+    assert.equal(parseSpoolRequest(bad), undefined, `${JSON.stringify(bad)} must be rejected`);
+  }
+});
+
+test("handleSpoolRequest routes asks to the choke handler and refuses loudly without one", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const factory = createFactory({ stateDir: join(dir, "state") });
+
+  const refused = await handleSpoolRequest(factory, { id: "r1", kind: "ask", task: "T1", command: "x" });
+  assert.equal(refused.ok, false);
+  if (!refused.ok) {
+    assert.equal(refused.code, "ask-unavailable");
+    assert.match(refused.message, /synthetic asks/);
+  }
+
+  const answered = await handleSpoolRequest(factory, { id: "r2", kind: "ask", task: "T1", command: "x" }, (req) => ({
+    id: req.id,
+    ok: true,
+    summary: "ask denied (test)",
+    decision: "denied",
+    rule: "policy:S1-git-vocabulary",
+  }));
+  assert.deepEqual(answered, {
+    id: "r2",
+    ok: true,
+    summary: "ask denied (test)",
+    decision: "denied",
+    rule: "policy:S1-git-vocabulary",
+  });
+});

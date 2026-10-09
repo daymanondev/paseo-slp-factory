@@ -1,5 +1,14 @@
 import { FactoryError } from "./errors.ts";
-import type { ClaimReported, ContractSet, FreshEyesWritten, GateFinished, LedgerEvent } from "./events.ts";
+import type {
+  ClaimReported,
+  ContractSet,
+  FreshEyesWritten,
+  GateFinished,
+  GitBlocked,
+  LedgerEvent,
+  PermitDenied,
+  PermitAllowed,
+} from "./events.ts";
 
 /**
  * Renders `report-<task>-<n>.md` from ledger events — every content line traces
@@ -31,8 +40,8 @@ export function renderReport(task: string, attempt: number, events: readonly Led
 
   const totalAttempts = new Set(
     events
-      .filter((e): e is Exclude<LedgerEvent, ContractSet> => e.task === task && e.event !== "contract_set")
-      .map((e) => e.attempt),
+      .filter((e) => e.task === task && "attempt" in e)
+      .map((e) => (e as { attempt: number }).attempt),
   ).size;
 
   const lines = [
@@ -42,6 +51,7 @@ export function renderReport(task: string, attempt: number, events: readonly Led
       contract.scope === undefined ? "" : ` · scope: ${contract.scope.map((s) => `\`${s}\``).join(", ")}`
     }`,
     `- Workspace: ${contract.workspace}`,
+    ...(chokeLines(events.filter(isChokeEventFor(task)))),
     `- Claimed @ ${formatTimestamp(claim.ts)}: ${claim.sha}`,
     ...(claim.agent === undefined ? [] : [`- Claimed by agent \`${claim.agent}\``]),
     ...(gate.sha === undefined ? [] : [`- Attested commit: \`${gate.sha}\``]),
@@ -60,6 +70,31 @@ function eyeLine(eye: FreshEyesWritten | undefined): string[] {
   const verdict = eye.outcome === "concern" ? "CONCERN" : eye.outcome === "clear" ? "CLEAR" : "FAILED";
   const suffix = eye.finding === "" ? "" : `: ${eye.finding}`;
   return [`- Fresh eyes (\`${eye.model}\`) — ${verdict}${suffix}`];
+}
+
+/**
+ * The task's choke section (v0.0.4): one summary line plus one line per deny
+ * and git block — the asks the choke judged while the task was live. Permit
+ * events are task-scoped, not attempt-scoped, so the same section renders in
+ * every Attempt's report. Absent when no ask was ever judged.
+ */
+function chokeLines(events: readonly LedgerEvent[]): string[] {
+  const allowed = events.filter((e): e is PermitAllowed => e.event === "permit_allowed");
+  const denied = events.filter((e): e is PermitDenied => e.event === "permit_denied");
+  const blocks = events.filter((e): e is GitBlocked => e.event === "git_blocked");
+  if (allowed.length + denied.length + blocks.length === 0) return [];
+  const lines = [`- Choke (task-wide): ${allowed.length} ask${allowed.length === 1 ? "" : "s"} allowed, ${denied.length} denied, ${blocks.length} git blocked`];
+  for (const d of denied) {
+    lines.push(`  - denied @ ${formatTimestamp(d.ts)}: ${d.command === undefined ? d.name : `\`${d.command}\``} — ${d.rule}`);
+  }
+  for (const b of blocks) {
+    lines.push(`  - git blocked @ ${formatTimestamp(b.ts)}: \`${b.command}\` — ${b.rule}`);
+  }
+  return lines;
+}
+
+function isChokeEventFor(task: string): (e: LedgerEvent) => boolean {
+  return (e) => e.task === task && (e.event === "permit_allowed" || e.event === "permit_denied" || e.event === "git_blocked");
 }
 
 function formatTimestamp(iso: string): string {

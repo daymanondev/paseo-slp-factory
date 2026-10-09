@@ -52,7 +52,11 @@ const DEFAULT_WAIT_SECS = 60;
 // src/events.ts because the CLIs import no src/ code (ADR 0004). Kept on one
 // line so test/status.test.ts can guard this copy against drift. Kept in sync
 // with the writer by the same suite, the way test/cli.test.ts guards the spool.
-const EVENT_NAMES = ["contract_set", "claim_reported", "gate_started", "gate_finished", "fresh_eyes_written", "report_written", "attempt_accepted"];
+const EVENT_NAMES = ["contract_set", "claim_reported", "gate_started", "gate_finished", "fresh_eyes_written", "report_written", "attempt_accepted", "permit_allowed", "permit_denied", "git_blocked"];
+// Events without an Attempt number: contract_set owns the Task, the choke
+// events (v0.0.4) belong to the Task's whole life, and git_blocked may carry
+// no task at all (the shim refuses no matter who runs it).
+const NO_ATTEMPT_EVENTS = new Set(["contract_set", "permit_allowed", "permit_denied", "git_blocked"]);
 
 function fail(message) {
   console.error(`factory: ${message}\n\n${usage}`);
@@ -217,8 +221,9 @@ function readLedgerEvents(path) {
       return corruptLedger(path, `line ${i + 1} is not valid JSON`);
     }
     if (typeof evt !== "object" || evt === null) return corruptLedger(path, `line ${i + 1} is not a valid ledger event`);
-    const attemptOk = evt.event === "contract_set" || (Number.isInteger(evt.attempt) && evt.attempt >= 1);
-    if (!EVENT_NAMES.includes(evt.event) || typeof evt.task !== "string" || !attemptOk) {
+    const taskOk = NO_ATTEMPT_EVENTS.has(evt.event) || typeof evt.task === "string";
+    const attemptOk = NO_ATTEMPT_EVENTS.has(evt.event) || (Number.isInteger(evt.attempt) && evt.attempt >= 1);
+    if (!EVENT_NAMES.includes(evt.event) || !taskOk || !attemptOk) {
       return corruptLedger(path, `line ${i + 1} is not a valid ledger event`);
     }
     events.push(evt);
@@ -231,13 +236,14 @@ function statusLines(events) {
   const order = [];
   const byTask = new Map();
   for (const evt of events) {
+    if (evt.event !== "contract_set" && NO_ATTEMPT_EVENTS.has(evt.event)) continue; // choke events carry no Attempt; untasked git blocks have no line at all
     let state = byTask.get(evt.task);
     if (state === undefined) {
       state = { attempts: 0, verdict: undefined, sha: undefined, eye: undefined, accepted: false };
       byTask.set(evt.task, state);
       order.push(evt.task);
     }
-    if (evt.event === "contract_set") continue; // the Contract belongs to the Task, not to an Attempt
+    if (evt.event === "contract_set") continue; // the Contract registers its Task's line, but never counts as an Attempt
     if (evt.attempt > state.attempts) state.attempts = evt.attempt;
     if (evt.event === "gate_finished") {
       state.verdict = evt.verdict; // the last verdict on record, even while a newer attempt runs

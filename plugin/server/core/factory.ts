@@ -87,6 +87,20 @@ export interface Factory {
    * never the Agent's.
    */
   accept(input: AcceptInput): AttemptAccepted;
+  /**
+   * The live Contract whose workspace contains `cwd`, if any — the choke's
+   * mechanical "contracted agent" test (v0.0.4 map decision 5: asks from
+   * agents without a live Contract are not the factory's business). Live =
+   * contract set and no accepted Attempt yet. When several live Contracts
+   * cover the same tree, the latest in ledger order wins.
+   */
+  liveContractFor(cwd: string): ContractSet | undefined;
+  /**
+   * The task's Contract — the one lookup every asker of a task's history
+   * needs (a Claim verifying its gate, a synthetic ask binding its cwd).
+   * Undefined when no Contract was ever set for the task.
+   */
+  contractFor(task: string): ContractSet | undefined;
 }
 
 export function createFactory(options: FactoryOptions): Factory {
@@ -171,9 +185,9 @@ export function createFactory(options: FactoryOptions): Factory {
 
     async claim({ task, sha, agent }) {
       assertTaskId(task);
-      const history = ledger.eventsFor(task);
-      const contract = history.findLast((e): e is ContractSet => e.event === "contract_set");
+      const contract = this.contractFor(task);
       if (!contract) throw new FactoryError("unknown-task", `no contract set for task ${task} — register one first`);
+      const history = ledger.eventsFor(task);
 
       // ADR 0003: Attempts never overlap. The previous one must have reached
       // its report before a new Claim opens the next Attempt.
@@ -330,7 +344,28 @@ export function createFactory(options: FactoryOptions): Factory {
       }
       return ledger.append({ event: "attempt_accepted", task, attempt });
     },
+
+    liveContractFor(cwd) {
+      const accepted = new Set<string>();
+      for (const evt of ledger.events) {
+        if (evt.event === "attempt_accepted") accepted.add(evt.task);
+      }
+      let match: ContractSet | undefined;
+      for (const evt of ledger.events) {
+        if (evt.event === "contract_set" && !accepted.has(evt.task) && covers(evt, cwd)) match = evt;
+      }
+      return match;
+    },
+
+    contractFor(task) {
+      return ledger.eventsFor(task).findLast((e): e is ContractSet => e.event === "contract_set");
+    },
   };
+}
+
+/** A Contract covers a cwd when the cwd is the workspace or sits inside it. */
+function covers(contract: ContractSet, cwd: string): boolean {
+  return cwd === contract.workspace || cwd.startsWith(`${contract.workspace}/`);
 }
 
 /**
@@ -394,14 +429,14 @@ function writeAttemptReport(task: string, attempt: number, ledger: Ledger, state
 function maxAttempt(history: readonly LedgerEvent[]): number {
   let max = 0;
   for (const evt of history) {
-    if (evt.event !== "contract_set" && evt.attempt > max) max = evt.attempt;
+    if ("attempt" in evt && evt.attempt > max) max = evt.attempt;
   }
   return max;
 }
 
-/** One Attempt's own events — the Contract belongs to the Task, not to any Attempt. */
+/** One Attempt's own events — Contracts and choke events belong to the Task, not to any Attempt. */
 function attemptEvents(history: readonly LedgerEvent[], attempt: number): LedgerEvent[] {
-  return history.filter((e) => e.event !== "contract_set" && e.attempt === attempt);
+  return history.filter((e) => "attempt" in e && e.attempt === attempt);
 }
 
 /**
@@ -426,7 +461,7 @@ function attemptIsOpen(history: readonly LedgerEvent[], attempt: number): boolea
  */
 function recoverInterruptedAttempts(ledger: Ledger, stateDir: string): { task: string; attempt: number }[] {
   const recovered: { task: string; attempt: number }[] = [];
-  const tasks = [...new Set(ledger.events.map((e) => e.task))];
+  const tasks = [...new Set(ledger.events.map((e) => e.task).filter((task): task is string => typeof task === "string"))];
   for (const task of tasks) {
     const history = ledger.eventsFor(task);
     for (let attempt = 1; attempt <= maxAttempt(history); attempt++) {

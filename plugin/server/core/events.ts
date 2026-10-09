@@ -10,11 +10,20 @@
  * and acceptance names one green Attempt. `fresh_eyes_written` is v0.0.2
  * (ticket 03): one advisory line between a green `gate_finished` and its
  * `report_written` — evidence for the Owner, never a second Verdict.
+ * The choke events (`permit_allowed` / `permit_denied` / `git_blocked`,
+ * v0.0.4) are task-scoped but NOT attempt-scoped: a permit ask belongs to
+ * the work before any Claim, and a git block to any moment — so they carry
+ * no `attempt`, and `git_blocked` may carry no `task` at all (the shim
+ * refuses no matter who runs it; the ledger records what it can bind).
  */
 
 export type Verdict = "red" | "green";
 
-/** The whole event vocabulary, in ledger order — single source for types and validation. */
+/**
+ * The whole event vocabulary — single source for types and validation. The
+ * first seven are the attempt-scoped loop in ledger order; the last three are
+ * the v0.0.4 choke vocabulary, appended after it.
+ */
 export const EVENT_NAMES = [
   "contract_set",
   "claim_reported",
@@ -23,6 +32,9 @@ export const EVENT_NAMES = [
   "fresh_eyes_written",
   "report_written",
   "attempt_accepted",
+  "permit_allowed",
+  "permit_denied",
+  "git_blocked",
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];
@@ -133,6 +145,60 @@ export interface AttemptAccepted {
   attempt: number;
 }
 
+/**
+ * The choke allowed a contracted agent's permit ask (v0.0.4). One line per
+ * judged ask — allowed asks are the permit parade made countable; paseo
+ * persists permission decisions nowhere, so this line is the only record.
+ */
+export interface PermitAllowed {
+  seq: number;
+  ts: Timestamp;
+  event: "permit_allowed";
+  /** The task whose live Contract bound the asking agent to the choke. */
+  task: string;
+  /** The asking agent's id — a daemon agent, or the spool asker's name. */
+  agent: string;
+  /** The tool name from the ask (e.g. `Bash`, `Write`). */
+  name: string;
+  /** The ask kind: "tool" | "plan" | "question" | "mode" | "other". */
+  kind: string;
+  /** What the ask aimed at: the exact shell line (`detail.command`), or the write/edit ask's target file path. */
+  command?: string;
+}
+
+/** The choke denied a contracted agent's permit ask — one line, rule and reason named. */
+export interface PermitDenied extends Omit<PermitAllowed, "event"> {
+  event: "permit_denied";
+  /** Which deny-list entry fired (e.g. `policy:S1-git-vocabulary`). */
+  rule: string;
+  /** One line saying what the rule caught. */
+  reason: string;
+}
+
+/**
+ * The git shim refused a dangerous argv at exec time (v0.0.4). Written by the
+ * plugin from the shim's log line, deduplicated by `blockId` across plugin
+ * lifetimes. `task` is present exactly when the refusal's cwd sat inside a
+ * live Contract's workspace — the shim refuses regardless.
+ */
+export interface GitBlocked {
+  seq: number;
+  ts: Timestamp;
+  event: "git_blocked";
+  task?: string;
+  /** The agent whose shell ran the refused git, when the daemon stamped one. */
+  agent?: string;
+  /** The refused argv, joined back into one line. */
+  command: string;
+  /** Which refusal-list class fired (e.g. `git:force-push`). */
+  rule: string;
+  reason: string;
+  /** The shell's cwd at the refusal — what bound it to a task, or did not. */
+  cwd: string;
+  /** The shim log line's id — ingestion's exactly-once key. */
+  blockId: string;
+}
+
 export type LedgerEvent =
   | ContractSet
   | ClaimReported
@@ -140,7 +206,10 @@ export type LedgerEvent =
   | GateFinished
   | FreshEyesWritten
   | ReportWritten
-  | AttemptAccepted;
+  | AttemptAccepted
+  | PermitAllowed
+  | PermitDenied
+  | GitBlocked;
 
 /** What callers hand to Ledger.append — same shape, `seq` and `ts` not yet assigned. */
 export type PendingEvent =
@@ -150,4 +219,7 @@ export type PendingEvent =
   | Omit<GateFinished, "seq" | "ts">
   | Omit<FreshEyesWritten, "seq" | "ts">
   | Omit<ReportWritten, "seq" | "ts">
-  | Omit<AttemptAccepted, "seq" | "ts">;
+  | Omit<AttemptAccepted, "seq" | "ts">
+  | Omit<PermitAllowed, "seq" | "ts">
+  | Omit<PermitDenied, "seq" | "ts">
+  | Omit<GitBlocked, "seq" | "ts">;

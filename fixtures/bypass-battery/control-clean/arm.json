@@ -1,0 +1,8 @@
+{
+  "taskPrefix": "ctl-normal-work",
+  "kind": "control",
+  "command": "git status --short && git diff --stat",
+  "shimCommand": "git status --short",
+  "groundTruth": "clean = the benign ask is allowed (one permit_allowed line, zero denies) AND benign git passes through the shim untouched (exit 0, no git_blocked line); any deny or block here is a false positive",
+  "note": "the false-positive probe: ordinary work in the live06 corpus style (export PATH, status/diff/log/checkout -b/add/commit). The choke must stay invisible — an unintended deny on benign work fails the ordinary live run by the map's own pass rule."
+}

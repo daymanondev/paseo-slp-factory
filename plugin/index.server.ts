@@ -5,18 +5,21 @@
  * at boot (recovering interrupted attempts per ADR 0003), keeps the factory
  * instance for its lifetime as the single Ledger writer and Gate runner, and
  * serves the spool that the CLIs submit through. It also puts the Claim CLI
- * on every agent's PATH. The Owner reaches the same loop through
- * `plugin/bin/factory.mjs` (`contract`, `accept`), which is never on an agent
- * PATH.
+ * and the git shim on every agent's PATH, and — since v0.0.4 — runs the
+ * choke: every permit ask from a contracted agent is judged, answered via
+ * `respondToPermission()`, and recorded (`plugin/server/choke.ts`). The Owner
+ * reaches the same loop through `plugin/bin/factory.mjs` (`contract`,
+ * `accept`), which is never on an agent PATH.
  */
 import { homedir } from "node:os";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createFactory } from "./server/core/factory.ts";
 import { PLUGIN_ID, pluginDirFor, resolvePaseoHome, stateDirFor } from "./server/paths.ts";
-import { claimCliBinDir, ensureClaimCli, injectClaimCliPath } from "./server/shell.ts";
+import { claimCliBinDir, ensureClaimCli, ensureGitShim, injectClaimCliPath } from "./server/shell.ts";
+import { createChoke, startGitBlockIngestion } from "./server/choke.ts";
 import { spoolRootFor, startSpool } from "./server/spool.ts";
 
-const SHELL_VERSION = "0.0.2";
+const SHELL_VERSION = "0.0.4";
 
 const log = (message: string) => console.log(`[${PLUGIN_ID}] ${message}`);
 
@@ -35,14 +38,33 @@ export default function contribute(server: PluginServerContext) {
 
   if (pluginDir === undefined) {
     log(`up v${SHELL_VERSION} — WARNING: plugin directory not recorded in ${home}/config.json; ` +
-      `factory-claim cannot be put on agent PATHs until the plugin is installed from a directory`);
+      `factory-claim and the git shim cannot be put on agent PATHs until the plugin is installed from a directory`);
   } else {
     ensureClaimCli(stateDir, pluginDir, process.execPath);
-    log(`up v${SHELL_VERSION} — state ${stateDir}, plugin ${pluginDir}, claim CLI ${claimCliBinDir(stateDir)}`);
+    ensureGitShim(stateDir, pluginDir, process.execPath);
+    log(`up v${SHELL_VERSION} — state ${stateDir}, plugin ${pluginDir}, claim CLI + git shim ${claimCliBinDir(stateDir)}`);
   }
 
-  const spool = startSpool(stateDir, factory, { onLog: log });
+  // The choke (v0.0.4): judge every permit ask from a contracted agent,
+  // answer it, and leave one ledger line per judged ask. The permission mode
+  // is pinned at create so asks always surface (a blinded choke is the shim
+  // alone).
+  const choke = createChoke({ factory, homeDir: homedir(), onLog: log });
+  const offPermissionAsked = server.on("agent.permission_requested", (event, context) => {
+    void choke.onPermissionAsked(event, context.paseo);
+  });
+  const offAgentCreate = server.before("agent.create", ({ request }) => {
+    const next = choke.pinCreateMode(request.config);
+    if (next !== undefined) {
+      log(`choke: pinned permission mode to Always Ask for the new agent in ${request.config.cwd}`);
+    }
+    return next === undefined ? undefined : { ...request, config: next };
+  });
+
+  const spool = startSpool(stateDir, factory, { onLog: log, ask: choke.spoolAskHandler });
   log(`spool listening on ${spoolRootFor(stateDir)}/{requests,replies,processed}`);
+
+  const gitBlocks = startGitBlockIngestion(factory, { onLog: log });
 
   const offSessionOpen = server.before("agent.session_open", ({ request }) => {
     if (pluginDir === undefined) return undefined;
@@ -54,7 +76,10 @@ export default function contribute(server: PluginServerContext) {
   });
 
   return () => {
+    offPermissionAsked();
+    offAgentCreate();
     offSessionOpen();
+    gitBlocks.stop();
     spool.stop();
     log(`down v${SHELL_VERSION}`);
   };

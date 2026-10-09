@@ -17,6 +17,14 @@ export type { EyeConfig, EyeConfigResult, FreshEyesOutcome, FreshEyesPassInput, 
 export { renderReport } from "./report.ts";
 export { FactoryError } from "./errors.ts";
 export {
+  judgeShellCommand,
+  judgeFilePath,
+  refuseGitArgv,
+  shellTokens,
+  writableRootsFor,
+} from "./choke.ts";
+export type { ChokeDecision, GitRefusal, WritableRoots } from "./choke.ts";
+export {
   DEFAULT_GATE_TIMEOUT_MS,
   GATE_OUTPUT_CAP_BYTES,
   REPORT_NOTE_MAX_CHARS,
@@ -38,5 +46,8 @@ export type {
   FreshEyesWritten,
   ReportWritten,
   AttemptAccepted,
+  PermitAllowed,
+  PermitDenied,
+  GitBlocked,
 } from "./events.ts";
 export { EVENT_NAMES } from "./events.ts";
