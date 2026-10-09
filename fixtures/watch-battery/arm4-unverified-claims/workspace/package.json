@@ -1,0 +1,8 @@
+{
+  "name": "watch-armunverifiedclaims",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-reporter=tap"
+  }
+}
