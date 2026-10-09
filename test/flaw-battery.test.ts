@@ -114,7 +114,7 @@ test("dry-run: all five arms settle through the real CLIs; sequences, scope wiri
   // One eye pass per arm, no retries; the per-arm line carries outcome + finding.
   assert.equal(fake.requests.length, 5, "one green claim per arm, one eye pass each");
   for (const [prefix, answer] of Object.entries(ARM_ANSWERS)) {
-    const task = factory.ledger.events.map((e) => e.task).find((id) => id?.startsWith(`${prefix}-`));
+    const task = factory.ledger.events.flatMap((e) => ("task" in e ? [e.task] : [])).find((id) => id?.startsWith(`${prefix}-`));
     assert.ok(task, `an arm task with prefix ${prefix} ran`);
     assertArmLedger(factory, task, answer.outcome);
     assert.match(
@@ -126,7 +126,7 @@ test("dry-run: all five arms settle through the real CLIs; sequences, scope wiri
   }
 
   // Arm 4's contract is deliberately unscoped; the scoped arms declare src.
-  const arm4 = factory.ledger.events.find((e) => e.task?.startsWith("a4-release-0-3-1-")) as ContractSet;
+  const arm4 = factory.ledger.events.find((e) => "task" in e && e.task?.startsWith("a4-release-0-3-1-")) as ContractSet;
   assert.equal(arm4.scope, undefined, "arm 4's contract is unscoped — the eye is the only defense");
   const arm4Request = fake.requests.find((r) => {
     const content = (r.body as { messages?: { content?: unknown }[] }).messages?.[0]?.content;
@@ -136,7 +136,7 @@ test("dry-run: all five arms settle through the real CLIs; sequences, scope wiri
   const arm4Prompt = (arm4Request.body as { messages: { content: string }[] }).messages[0]!.content;
   assert.ok(arm4Prompt.includes("unrestricted"), "the eye reads arm 4's scope as unrestricted");
   for (const prefix of ["a1-ttl-admission", "a2-mean-readings", "a3-uploader-strict-2xx", "ctl-add-truncate-helper"]) {
-    const contract = factory.ledger.events.find((e) => e.task?.startsWith(`${prefix}-`)) as ContractSet;
+    const contract = factory.ledger.events.find((e) => "task" in e && e.task?.startsWith(`${prefix}-`)) as ContractSet;
     assert.deepEqual(contract.scope, ["src"], `${prefix} runs scoped to src`);
   }
 
@@ -167,7 +167,7 @@ test("dry-run: a technically failed eye settles after exactly one re-run — exi
   assert.match(result.stdout, /re-running control-clean once, per the map's rule/);
   assert.match(result.stdout, /outcome=clear\s+\(after one technical re-run\)/);
 
-  const tasks = [...new Set(factory.ledger.events.map((e) => e.task).filter((id) => id?.startsWith("ctl-add-truncate-helper-")))];
+  const tasks = [...new Set(factory.ledger.events.flatMap((e) => ("task" in e ? [e.task] : [])).filter((id) => id?.startsWith("ctl-add-truncate-helper-")))];
   assert.equal(tasks.length, 2, "the re-run is its own stamped task");
   assertArmLedger(factory, tasks[0]!, "failed");
   assertArmLedger(factory, tasks[1]!, "clear");
@@ -185,7 +185,7 @@ test("dry-run: an arm that stays failed after its re-run drives the exit code to
   assert.match(result.stdout, /outcome=failed\s+\(after one technical re-run\)/);
   assert.match(result.stderr, /arms still technically failed after one re-run: control-clean/);
 
-  const tasks = [...new Set(factory.ledger.events.map((e) => e.task).filter((id) => id?.startsWith("ctl-add-truncate-helper-")))];
+  const tasks = [...new Set(factory.ledger.events.flatMap((e) => ("task" in e ? [e.task] : [])).filter((id) => id?.startsWith("ctl-add-truncate-helper-")))];
   assert.equal(tasks.length, 2);
   assertArmLedger(factory, tasks[0]!, "failed");
   assertArmLedger(factory, tasks[1]!, "failed");

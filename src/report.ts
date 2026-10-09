@@ -24,7 +24,8 @@ import type {
  * language as evidence, never as a second verdict.
  */
 export function renderReport(task: string, attempt: number, events: readonly LedgerEvent[]): string {
-  const mine = events.filter((e) => e.task === task && (e.event === "contract_set" || ("attempt" in e && e.attempt === attempt)));
+  // `retro_written` carries no task — the guard keeps the union honest.
+  const mine = events.filter((e): boolean => "task" in e && e.task === task && (e.event === "contract_set" || ("attempt" in e && e.attempt === attempt)));
   const contract = mine.findLast((e): e is ContractSet => e.event === "contract_set");
   const claim = mine.findLast((e): e is ClaimReported => e.event === "claim_reported");
   const gate = mine.findLast((e): e is GateFinished => e.event === "gate_finished");
@@ -44,8 +45,8 @@ export function renderReport(task: string, attempt: number, events: readonly Led
 
   const totalAttempts = new Set(
     events
-      .filter((e) => e.task === task && "attempt" in e)
-      .map((e) => (e as { attempt: number }).attempt),
+      .filter((e): e is LedgerEvent & { task: string; attempt: number } => "task" in e && e.task === task && "attempt" in e)
+      .map((e) => e.attempt),
   ).size;
 
   const lines = [
@@ -121,7 +122,7 @@ function chokeLines(events: readonly LedgerEvent[]): string[] {
 }
 
 function isChokeEventFor(task: string): (e: LedgerEvent) => boolean {
-  return (e) => e.task === task && (e.event === "permit_allowed" || e.event === "permit_denied" || e.event === "git_blocked");
+  return (e) => "task" in e && e.task === task && (e.event === "permit_allowed" || e.event === "permit_denied" || e.event === "git_blocked");
 }
 
 function formatTimestamp(iso: string): string {

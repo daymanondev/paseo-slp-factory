@@ -21,8 +21,12 @@
  * no `attempt` (ADR 0004's amendment: the driver never writes, the plugin
  * validates and records). `watch_written` is v0.0.6 (ticket 03): the
  * record-only Jev pass's one line — it lands beside `fresh_eyes_written`
- * on BOTH verdicts (the fake-done and stuck-loop battery arms are red by
- * construction), and nothing downstream branches on it (record-only law).
+ * on BOTH verdicts (the stuck-loop battery arm is red by construction),
+ * and nothing downstream branches on it (record-only law).
+ * `retro_written` is v0.0.7 (ticket 03): the first factory-level event — no
+ * task, no attempt, like every Retro line — one per on-demand Retro pass,
+ * written only when the pass produced its proposals file (file first, then
+ * the line; a refused Retro writes no line at all).
  */
 
 export type Verdict = "red" | "green";
@@ -31,7 +35,8 @@ export type Verdict = "red" | "green";
  * The whole event vocabulary — single source for types and validation. The
  * first eight are the attempt-scoped loop in ledger order; the choke
  * vocabulary (v0.0.4) and the spawn vocabulary (v0.0.5) follow, appended
- * after their host loops.
+ * after their host loops; `retro_written` (v0.0.7) closes as the one
+ * factory-level event.
  */
 export const EVENT_NAMES = [
   "contract_set",
@@ -47,6 +52,7 @@ export const EVENT_NAMES = [
   "git_blocked",
   "spawn_dispatched",
   "spawn_refused",
+  "retro_written",
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];
@@ -155,8 +161,9 @@ export interface FreshEyesWritten {
 }
 
 /**
- * The watch line (v0.0.6, ticket 03): one record-only pass that asked the
- * eight Watch questions of one Attempt — red and green both. `answers` maps
+ * The watch line (v0.0.6, ticket 03; questions shrunk to four in v0.0.7
+ * ticket 04 rider #1): one record-only pass that asked the Watch questions
+ * of one Attempt — red and green both. `answers` maps
  * every question name to its yes-probability, or null when the response did
  * not answer it (a partially-answered response is `outcome: "failed"` with
  * `error` naming the missing — never a silent gap). Priors are NOT here: the
@@ -294,6 +301,34 @@ export interface SpawnRefused {
   reason: string;
 }
 
+/**
+ * The Retro's one line (v0.0.7, ticket 03) — the first factory-level event:
+ * no task, no attempt, because the Retro reads the whole ledger, not any
+ * task's slice of it. Mirrors `watch_written`'s shape: `model` is the pinned
+ * Copilot seat (`copilot/gpt-5.4`), `outcome` is `written` (the proposals
+ * file landed first, then this line — a death between leaves an orphan file
+ * that never happened, a line without a file cannot occur) or `failed` (a
+ * technical death — CLI error, timeout, parse failure — named in `error`,
+ * no file written). `proposalsPath`/`proposalCount` ride only `written`.
+ * A refused Retro (copilot unusable, same-day duplicate) writes no line at
+ * all — nothing changed, so nothing is recorded.
+ */
+export interface RetroWritten {
+  seq: number;
+  ts: Timestamp;
+  event: "retro_written";
+  /** `copilot/<model>` — the pinned seat, like the watch's `model` field. */
+  model: string;
+  outcome: "written" | "failed";
+  durationMs: number;
+  /** On failed: the reason, named (CLI error, budget, parse failure). */
+  error?: string;
+  /** On written: the proposals file this line attests. */
+  proposalsPath?: string;
+  /** On written: how many proposals the file carries. */
+  proposalCount?: number;
+}
+
 export type LedgerEvent =
   | ContractSet
   | ClaimReported
@@ -307,7 +342,8 @@ export type LedgerEvent =
   | PermitDenied
   | GitBlocked
   | SpawnDispatched
-  | SpawnRefused;
+  | SpawnRefused
+  | RetroWritten;
 
 /** What callers hand to Ledger.append — same shape, `seq` and `ts` not yet assigned. */
 export type PendingEvent =
@@ -323,4 +359,5 @@ export type PendingEvent =
   | Omit<PermitDenied, "seq" | "ts">
   | Omit<GitBlocked, "seq" | "ts">
   | Omit<SpawnDispatched, "seq" | "ts">
-  | Omit<SpawnRefused, "seq" | "ts">;
+  | Omit<SpawnRefused, "seq" | "ts">
+  | Omit<RetroWritten, "seq" | "ts">;

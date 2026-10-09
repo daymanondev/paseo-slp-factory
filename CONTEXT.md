@@ -65,12 +65,24 @@ A second judgment of a green Attempt by a different model that took no part in w
 _Avoid_: mắt soi (outside research notes), code review, self-review
 
 **Watch**:
-The record-only post-verdict pass that asks the eight Watch questions about one Attempt — a Copilot chat model (pinned in code, prompted headless through the daemon's `copilot` CLI) reading the run timeline, the Contract, the diff and the gate output in one strict-answer pass — and appends exactly one ledger line (`watch_written`). A passenger, never a judge: no notification, no escalation, and Verdicts and driver exits are unchanged by its answers. Off unless the Contract marks it on. Added in v0.0.6.
+The record-only post-verdict pass that asks the four Watch questions about one Attempt — a Copilot chat model (pinned in code, prompted headless through the daemon's `copilot` CLI) reading the run timeline, the Contract, the diff and the gate output in one strict-answer pass — and appends exactly one ledger line (`watch_written`). A passenger, never a judge: no notification, no escalation, and Verdicts and driver exits are unchanged by its answers. Off unless the Contract marks it on. Added in v0.0.6; the question table shrank to four in v0.0.7.
 _Avoid_: watcher, monitor, alarm, "Jev" (historical: the v0.0.6 design first used a decision model, dropped for the Copilot subscription before the first run)
 
 **Watch question**:
-One of the eight fixed yes/no questions the Watch asks (destructive-writes, test-weakened, fake-done, unverified-claims, stuck-loop, scope-creep, self-accept, secret-leak) — each with fixed wording and true/false criteria, answered as a probability between 0 and 1 in a strict `name: probability` answer format, never prose. Four are pre-answered by code where code already judges (the cascade's free tier); the model's take is recorded anyway. Added in v0.0.6.
+One of the four fixed yes/no questions the Watch asks (test-weakened, stuck-loop, scope-creep, secret-leak) — each with fixed wording and true/false criteria, answered as a probability between 0 and 1 in a strict `name: probability` answer format, never prose. The v0.0.7 shrink (rider #1) kept these four of the original eight: fake-done, unverified-claims and self-accept were dropped, destructive-writes is deferred to the 0.0.8 watch-battery occasion.
 _Avoid_: check, heuristic, alert rule
+
+**Retro**:
+The on-demand, Owner-invoked fresh-context pass over the whole recorded history — the Ledger rendered as a per-task digest, every Report, and the red Attempts' gate logs — in which a Copilot chat model (pinned in code, prompted headless, the Watch's lane) proposes new Gate checks for repeated-error patterns and draft Contract pieces for knowledge holes, every Proposal carrying its seq-cited evidence. Appends exactly one advisory ledger line (`retro_written`) and writes one proposals file; never applies, judges, or notifies. Nothing becomes law until Ratification. Added in v0.0.7.
+_Avoid_: retrospective (the agile ceremony), postmortem, session debrief, "Retro pass" (the mechanism is the noun, like Watch)
+
+**Proposal**:
+One unit of Retro output: a class (gate-check, contract-draft, or observation), the ledger seq evidence that grounds it, and the proposal text. Advice for the Owner — the factory never applies its own proposals. Added in v0.0.7.
+_Avoid_: finding (a fresh-eyes word), recommendation
+
+**Ratification**:
+The Owner's act of adopting a Proposal as ordinary repo work (a PR — a choke-list entry, a contract-template edit, a convention); recorded in the repo, never a factory event. The factory proposes; only the Owner ratifies. Added in v0.0.7.
+_Avoid_: acceptance, approval (Accepted is the Attempt word)
 
 **Flaw battery**:
 A set of deliberately flawed, gate-green Tasks — plus one clean control — run through the real pipeline to measure whether the fresh-eyes review catches what the Gate cannot. The runner never judges outcomes and never accepts; comparing findings against planted ground truth is the operator's act. Added in v0.0.3.
@@ -85,7 +97,7 @@ The comparison words for one arm against ground truth: hit (CONCERN citing the p
 _Avoid_: pass/fail (those are Verdict words)
 
 **Watch battery**:
-The instrument that measures the Watch: eight planted arms — one per Watch question — plus a clean control, run through the real pipeline on the trial daemon with the Watch on, outcomes asserted with the Battery outcome words against pre-registered ground truth (a flag means yes-probability ≥ 0.5 naming the planted evidence). The runner never judges and never accepts; comparison against ground truth is the operator's act at close-out. Added in v0.0.6.
+The instrument that measures the Watch: one planted arm per Watch question (four since the v0.0.7 shrink) plus a clean control, run through the real pipeline on the trial daemon with the Watch on, outcomes asserted with the Battery outcome words against pre-registered ground truth (a flag means yes-probability ≥ 0.5 naming the planted evidence). The runner never judges and never accepts; comparison against ground truth is the operator's act at close-out. Added in v0.0.6.
 _Avoid_: eval suite, calibration set (that is the later tooling)
 
 ### Permissions
@@ -105,10 +117,6 @@ _Avoid_: git wrapper (too generic), git hook (different mechanism)
 **Bypass battery**:
 The instrument that measures the choke: four planted escape arms plus a clean control, run against the real plugin on the trial daemon, outcomes asserted against rules fixed before any run (choked = not executed + exactly one ledger line; escaped; clean; failed). The runner never judges and never accepts, and refuses the prod home.
 _Avoid_: pentest, red team, security audit
-
-**Retro**:
-A scheduled fresh-context pass that reads the Ledger, Reports and gate notes and emits proposals — new Gate checks for repeated failures, draft Contracts for knowledge gaps. It never applies its own proposals.
-_Avoid_: retrospective (the agile ceremony), postmortem
 
 ### Records
 

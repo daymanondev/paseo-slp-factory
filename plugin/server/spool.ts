@@ -75,6 +75,19 @@ export interface SpawnRequest {
 }
 
 /**
+ * The Owner's Retro request (v0.0.7, ticket 03 item 2): `factory retro`
+ * drops this and the plugin does everything — digest, copilot pass,
+ * proposals file, the one factory-level `retro_written` line (the one-writer
+ * law). Deliberately a NEW kind, not a contract reuse: different validation,
+ * different act. No arguments exist to carry: whole-ledger always, no
+ * `--since`, no task filter (v1).
+ */
+export interface RetroRequest {
+  id: string;
+  kind: "retro";
+}
+
+/**
  * A synthetic permit ask (v0.0.4) — the bypass battery's vehicle into the real
  * choke: the same policy, the same ledger lines, answered in the reply instead
  * of `respondToPermission()` because no daemon ask exists to answer. The task
@@ -91,7 +104,7 @@ export interface AskRequest {
   name?: string;
 }
 
-export type SpoolRequest = ContractRequest | ClaimRequest | AcceptRequest | AskRequest | SpawnRequest;
+export type SpoolRequest = ContractRequest | ClaimRequest | AcceptRequest | AskRequest | SpawnRequest | RetroRequest;
 
 /** Handles a synthetic ask — `createChoke(...).spoolAskHandler` is the implementation. */
 export type AskHandler = (request: AskRequest) => SpoolReply;
@@ -111,6 +124,9 @@ export type SpoolReply =
       decision?: "allowed" | "denied";
       rule?: string;
       reason?: string;
+      /** Retro replies: the proposals file and its count (the success stdout's two facts). */
+      proposalsPath?: string;
+      proposalCount?: number;
     }
   | { id: string; ok: false; code: string; message: string };
 
@@ -163,6 +179,13 @@ export function parseSpoolRequest(body: unknown): SpoolRequest | undefined {
       return undefined;
     }
     return { id: req.id, kind: "spawn", task: req.task, provider: req.provider, arity: req.arity };
+  }
+  if (req.kind === "retro") {
+    // The Retro carries nothing but its kind — whole-ledger always. The
+    // strict shape is the point: any extra field makes it not-a-retro.
+    const keys = Object.keys(req).filter((key) => key !== "id" && key !== "kind");
+    if (keys.length > 0) return undefined;
+    return { id: req.id, kind: "retro" };
   }
   if (req.kind === "ask") {
     if (typeof req.task !== "string" || typeof req.command !== "string" || req.command.trim() === "") return undefined;
@@ -253,6 +276,22 @@ export async function handleSpoolRequest(
         id: request.id,
         ok: true,
         summary: `spawn dispatched for ${request.task} under ${request.provider} (n=${request.arity})`,
+      };
+    }
+    if (request.kind === "retro") {
+      // The Owner's on-demand pass (v0.0.7): the plugin runs it whole. A
+      // `failed` outcome already ledgered its visible line — the reply still
+      // refuses (exit 2), so the Owner sees the error at the terminal too.
+      const outcome = await factory.retro();
+      if (outcome.outcome === "failed") {
+        return { id: request.id, ok: false, code: "retro-failed", message: outcome.error ?? "(no reason recorded)" };
+      }
+      return {
+        id: request.id,
+        ok: true,
+        summary: `retro written: ${outcome.proposalCount} proposals → ${outcome.proposalsPath}`,
+        proposalsPath: outcome.proposalsPath,
+        proposalCount: outcome.proposalCount,
       };
     }
     factory.accept({ task: request.task, attempt: request.attempt });
@@ -354,7 +393,7 @@ async function handleRequestFile(
     log(
       request.kind === "claim" && reply.ok
         ? `request ${id}: claim ${request.task} by ${request.agent ?? "unknown agent"} → attempt ${reply.attempt} ${reply.verdict}`
-        : `request ${id}: ${request.kind} ${request.task} → ${reply.ok ? (reply.decision ?? "ok") : `rejected (${reply.code})`}`,
+        : `request ${id}: ${request.kind}${"task" in request ? ` ${request.task}` : ""} → ${reply.ok ? (reply.decision ?? "ok") : `rejected (${reply.code})`}`,
     );
   }
   writeJsonAtomic(replyPath, reply);

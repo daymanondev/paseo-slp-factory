@@ -15,7 +15,6 @@ export type { GateInput, GateResult } from "./gate.ts";
 export { eyeConfigPath, loadEyeConfig, runFreshEyesPass, tailWithMarker, parseEyeAnswer } from "./fresh-eyes.ts";
 export type { EyeConfig, EyeConfigResult, FreshEyesOutcome, FreshEyesPassInput, ParsedEyeAnswer } from "./fresh-eyes.ts";
 export {
-  SELF_ACCEPT_CODE_ANSWER,
   WATCH_MODEL,
   WATCH_MODEL_ID,
   WATCH_QUESTIONS,
@@ -23,6 +22,7 @@ export {
   buildWatchPrompt,
   copilotAvailable,
   renderTimelineTranscript,
+  runCopilot,
   runWatchPass,
 } from "./watch.ts";
 export type {
@@ -36,6 +36,20 @@ export type {
   WatchTimelineEntry,
 } from "./watch.ts";
 export { renderReport } from "./report.ts";
+export {
+  RETRO_MODEL,
+  RETRO_MODEL_ID,
+  buildRetroDigest,
+  buildRetroPrompt,
+  orderForRatification,
+  parseRetroProposals,
+  renderRetroFile,
+  retroDay,
+  retroFilePath,
+  runRetroPass,
+  writtenRetroForDay,
+} from "./retro.ts";
+export type { ParsedRetro, RetroCorpus, RetroOutcome, RetroPassInput, RetroProposal } from "./retro.ts";
 export { FactoryError } from "./errors.ts";
 export {
   judgeShellCommand,
@@ -78,5 +92,6 @@ export type {
   GitBlocked,
   SpawnDispatched,
   SpawnRefused,
+  RetroWritten,
 } from "./events.ts";
 export { EVENT_NAMES } from "./events.ts";
