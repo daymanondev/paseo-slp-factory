@@ -476,9 +476,14 @@ export async function observeTasks(rpc, entries, { pollMs = POLL_MS, log = () =>
         const payload = await rpc.request({ type: "fetch_agent_request", agentId: entry.agentId }, { responseType: "fetch_agent_response" });
         if (payload.error !== undefined && payload.error !== null) throw rpcError(payload.error);
         if (payload.agent === null || payload.agent === undefined) {
-          // Daemon 0.11 answers an agent it cannot yet serve with `agent: null`
-          // and no error — right after create this is a registration race, not
-          // a death; only a null that persists past AGENT_MISSING_DEAD_MS is.
+          // Daemon 0.11 answers a single-agent fetch with null while the agent
+          // is mid-run (and right after create — a registration race). The
+          // agents-list RPC that would disambiguate is not answered on the
+          // session socket (verified live: the request is silently dropped),
+          // so a null is waited out — only one persisting past
+          // AGENT_MISSING_DEAD_MS is called a death. Slow-but-alive agents
+          // outrun the window and their verdicts still land in the ledger,
+          // which is what the run reads.
           if (entry.missingSince === undefined) {
             entry.missingSince = Date.now();
           } else if (Date.now() - entry.missingSince > AGENT_MISSING_DEAD_MS) {
