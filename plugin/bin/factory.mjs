@@ -40,8 +40,11 @@ commands:
                                      (needs <stateDir>/eye.json; the pass is
                                      advisory and runs only on green verdicts)
              [--watch]               mark the watch pass ON for this task
-                                     (needs <stateDir>/watch.json; record-only,
-                                     one watch_written line after EVERY verdict)
+                                     (needs the copilot CLI usable on the
+                                     daemon's PATH — the CLI carries the
+                                     watch's auth, there is no key file;
+                                     record-only, one watch_written line
+                                     after EVERY verdict)
              [--description <text>]  the task's assignment in the Owner's words —
                                      the driver's brief carries it (v0.0.6)
 
