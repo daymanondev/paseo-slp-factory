@@ -8,6 +8,7 @@ import {
   prepareWorkspace,
   readDriverLedger,
   renderBrief,
+  renderRunBanner,
   splitProvider,
   taskOutcome,
 } from "../plugin/bin/driver.mjs";
@@ -47,6 +48,11 @@ test("renderBrief carries the contract's description ahead of the fixed body (th
 test("splitProvider takes provider[/model] on the first slash", () => {
   assert.deepEqual(splitProvider("claude"), { provider: "claude", model: undefined });
   assert.deepEqual(splitProvider("claude/opus-4-8"), { provider: "claude", model: "opus-4-8" });
+});
+
+test("renderRunBanner echoes the invocation's provider exactly once", () => {
+  assert.equal(renderRunBanner(["T1"], "claude"), "factory: run T1 (n=1) — provider claude");
+  assert.equal(renderRunBanner(["T1", "T2"], "copilot/gpt-5.4"), "factory: run T1 T2 (n=2) — provider copilot/gpt-5.4");
 });
 
 test("readDriverLedger: missing ledger is empty, an unterminated tail is ignored, junk refuses", (t) => {
