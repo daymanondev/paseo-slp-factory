@@ -25,8 +25,8 @@
  * the factory, no reply from the plugin, or an unreadable ledger).
  */
 import { parseArgs } from "node:util";
-import { readFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
+import { readLedgerEvents } from "./ledger-read.mjs";
 import { awaitReply, randomId, resolveHome, spoolRootFor, stateDirFor, submit } from "./spool-client.mjs";
 
 const usage = `usage: factory [--home <paseoHome>] <command> [options]
@@ -73,6 +73,18 @@ const EVENT_NAMES = ["contract_set", "claim_reported", "gate_started", "gate_fin
 // task at all (the shim refuses no matter who runs it), and the spawn events
 // (v0.0.5) precede any attempt — the plugin records them before an agent exists.
 const NO_ATTEMPT_EVENTS = new Set(["contract_set", "permit_allowed", "permit_denied", "git_blocked", "spawn_dispatched", "spawn_refused"]);
+
+/**
+ * The status reader's shape rule — every event is in the vocabulary above and
+ * carries task/attempt per the NO_ATTEMPT rule. Handed to the shared reader
+ * (ledger-read.mjs) as its strictness: a line failing it is corruption, named
+ * with its line number.
+ */
+function isValidLedgerEvent(evt) {
+  const taskOk = NO_ATTEMPT_EVENTS.has(evt.event) || typeof evt.task === "string";
+  const attemptOk = NO_ATTEMPT_EVENTS.has(evt.event) || (Number.isInteger(evt.attempt) && evt.attempt >= 1);
+  return EVENT_NAMES.includes(evt.event) && taskOk && attemptOk;
+}
 
 function fail(message) {
   console.error(`factory: ${message}\n\n${usage}`);
@@ -220,8 +232,17 @@ if (command === "status") {
   const parsed = parseCommandOptions({});
   if (parsed.positionals.length > 0) fail(`status: unexpected positional "${parsed.positionals[0]}"`);
 
+  // The Owner's own data, read back directly — no spool round trip, no plugin
+  // needed (ADR 0004 makes the plugin the only writer, not the only reader).
+  // The read is the shared one (ledger-read.mjs) under status's strict
+  // policy; anything unreadable is reported (exit 2), never guessed around.
   const ledgerPath = join(stateDir, "ledger.jsonl");
-  const events = readLedgerEvents(ledgerPath);
+  const read = readLedgerEvents(ledgerPath, { validateEvent: isValidLedgerEvent });
+  if (read.failed !== undefined) {
+    die(`cannot read ${ledgerPath}: ${read.failed instanceof Error ? read.failed.message : String(read.failed)}`);
+  }
+  if (read.corrupt !== undefined) corruptLedger(ledgerPath, read.corrupt);
+  const events = read.missing ? null : read.events;
   if (events === null || events.length === 0) {
     console.log(`factory: no tasks yet (ledger: ${ledgerPath})`);
     process.exit(0);
@@ -231,49 +252,6 @@ if (command === "status") {
 }
 
 fail(`unknown command "${command}"`);
-
-/**
- * Reads the ledger for `status` — the Owner's own data, read back directly;
- * no spool round trip, no plugin needed (ADR 0004 makes the plugin the only
- * writer, not the only reader).
- *
- * Forgiving of exactly the one thing the writer's fsync-per-line contract
- * forgives (ADR 0003): a last line with no trailing newline was never
- * acknowledged, so it is ignored here just as the core's open-time quarantine
- * ignores it — status never writes, so it cannot quarantine. Anything else
- * unreadable is reported (exit 2), never guessed around. Returns null when
- * the ledger does not exist yet (the plugin has never run on this home).
- */
-function readLedgerEvents(path) {
-  let raw;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return null;
-    die(`cannot read ${path}: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  const events = [];
-  const lines = raw.split("\n");
-  lines.pop(); // the "" after a final newline — or the unacknowledged unterminated tail
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line === "") return corruptLedger(path, `blank line at line ${i + 1}`);
-    let evt;
-    try {
-      evt = JSON.parse(line);
-    } catch {
-      return corruptLedger(path, `line ${i + 1} is not valid JSON`);
-    }
-    if (typeof evt !== "object" || evt === null) return corruptLedger(path, `line ${i + 1} is not a valid ledger event`);
-    const taskOk = NO_ATTEMPT_EVENTS.has(evt.event) || typeof evt.task === "string";
-    const attemptOk = NO_ATTEMPT_EVENTS.has(evt.event) || (Number.isInteger(evt.attempt) && evt.attempt >= 1);
-    if (!EVENT_NAMES.includes(evt.event) || !taskOk || !attemptOk) {
-      return corruptLedger(path, `line ${i + 1} is not a valid ledger event`);
-    }
-    events.push(evt);
-  }
-  return events;
-}
 
 /** One line per task, in first-appearance (ledger) order: the Owner's glance at the factory. */
 function statusLines(events) {
