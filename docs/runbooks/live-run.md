@@ -43,6 +43,10 @@ agent it remains the only path.
   `~/.paseo-factory/plugin-state/paseo-factory/eye.json` exists and is mode
   600. Credentials are placed by the human before the run, never from inside
   it.
+- When the run measures the watch (v0.0.6): the same law for
+  `~/.paseo-factory/plugin-state/paseo-factory/watch.json` — mode 600,
+  `{"apiKey": "<OpenRouter key>"}` and nothing else. The model and endpoint
+  are pinned in code; only the key is config.
 
 ## 2. Baseline — mandatory, before the agent exists
 
@@ -60,7 +64,8 @@ working agent.
       --gate "<absolute-node> --test \"test/*.test.ts\"" \
       --artifact <workspace-relative path> \
       [--scope plugin/bin,test] \
-      [--fresh-eyes]
+      [--fresh-eyes] [--watch] \
+      [--description "<the task's assignment, in the Owner's words>"]
 
 - The gate runs under the daemon's env, which has no nvm — resolve node
   absolutely when the contract is set (`$(which node)`), or the suite dies at
@@ -75,6 +80,14 @@ working agent.
   one `spawn_refused` ledger line.
 - `--fresh-eyes` only when the run means to measure the eye (it needs
   `eye.json`, checked in step 1).
+- `--watch` (v0.0.6) only when the run means to measure the watch (it needs
+  `watch.json`, checked in step 1). The pass is record-only: one
+  `watch_written` ledger line after EVERY verdict — red included — and a
+  Watch line in the report; verdicts, accepts and driver exits never read it.
+- `--description` (v0.0.6) carries the task's assignment; the driver's brief
+  hands it to the agent verbatim. This retires the v0.0.5 TASK.md seed
+  workaround — no seeded assignment commit, nothing to drop at landing; write
+  the assignment here instead.
 - `contract_set` records the base sha; note it in the ticket.
 - The contract must precede `factory run` (step 4) — the driver reads the
   task's workspace and gate from it.
@@ -108,7 +121,8 @@ Per task, in order:
   gets no reply stays in the spool and may still be processed.
 - **Create** — the agent is created over the daemon's own WebSocket RPC, its
   brief this runbook's fixed template (step 5) with the PATH baked from the
-  driver's own environment at spawn time — the operator types nothing.
+  driver's own environment at spawn time, and the contract's `--description`
+  riding ahead of it when one was set (v0.0.6) — the operator types nothing.
   Spawns stagger a few seconds apart — CPU etiquette, not correctness: the
   gates must not serialize (ticket 03 §7).
 - **Watch** — one observe loop polls ~5s snapshots per agent to its terminal

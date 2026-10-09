@@ -35,6 +35,10 @@ export interface ContractRequest {
   scope?: string[];
   /** Marks the fresh-eyes pass ON (ADR 0005 default: off). Exactly `true` passes; anything else is rejected. */
   freshEyes?: true;
+  /** Marks the watch pass ON (v0.0.6, record-only, both verdicts). Exactly `true` passes; anything else is rejected. */
+  watch?: true;
+  /** The task's assignment text (v0.0.6 description-slot rider) — the driver's brief carries it. */
+  description?: string;
 }
 
 export interface ClaimRequest {
@@ -130,6 +134,8 @@ export function parseSpoolRequest(body: unknown): SpoolRequest | undefined {
     const scope = req.scope;
     if (scope !== undefined && (!Array.isArray(scope) || scope.some((s) => typeof s !== "string"))) return undefined;
     if (req.freshEyes !== undefined && req.freshEyes !== true) return undefined;
+    if (req.watch !== undefined && req.watch !== true) return undefined;
+    if (req.description !== undefined && (typeof req.description !== "string" || req.description.trim() === "")) return undefined;
     return {
       id: req.id,
       kind: "contract",
@@ -139,6 +145,8 @@ export function parseSpoolRequest(body: unknown): SpoolRequest | undefined {
       artifact: req.artifact,
       ...(scope === undefined ? {} : { scope: scope as string[] }),
       ...(req.freshEyes === undefined ? {} : { freshEyes: true }),
+      ...(req.watch === undefined ? {} : { watch: true }),
+      ...(req.description === undefined ? {} : { description: req.description }),
     };
   }
   if (req.kind === "claim") {
@@ -195,8 +203,16 @@ export async function handleSpoolRequest(
         artifact: request.artifact,
         ...(request.scope === undefined ? {} : { scope: request.scope }),
         ...(request.freshEyes === undefined ? {} : { freshEyes: true }),
+        ...(request.watch === undefined ? {} : { watch: true }),
+        ...(request.description === undefined ? {} : { description: request.description }),
       });
-      return { id: request.id, ok: true, summary: `contract set for ${request.task}: \`${request.gate}\` in ${request.workspace}${request.freshEyes === true ? " · fresh eyes ON" : ""}` };
+      return {
+        id: request.id,
+        ok: true,
+        summary:
+          `contract set for ${request.task}: \`${request.gate}\` in ${request.workspace}` +
+          `${request.freshEyes === true ? " · fresh eyes ON" : ""}${request.watch === true ? " · watch ON" : ""}`,
+      };
     }
     if (request.kind === "claim") {
       const outcome = await factory.claim({

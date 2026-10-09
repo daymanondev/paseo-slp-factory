@@ -19,14 +19,17 @@
  * driver's arrival in the ledger: the plugin records one line per spawn
  * request — allowed or refused — before any agent exists, so they too carry
  * no `attempt` (ADR 0004's amendment: the driver never writes, the plugin
- * validates and records).
+ * validates and records). `watch_written` is v0.0.6 (ticket 03): the
+ * record-only Jev pass's one line — it lands beside `fresh_eyes_written`
+ * on BOTH verdicts (the fake-done and stuck-loop battery arms are red by
+ * construction), and nothing downstream branches on it (record-only law).
  */
 
 export type Verdict = "red" | "green";
 
 /**
  * The whole event vocabulary — single source for types and validation. The
- * first seven are the attempt-scoped loop in ledger order; the choke
+ * first eight are the attempt-scoped loop in ledger order; the choke
  * vocabulary (v0.0.4) and the spawn vocabulary (v0.0.5) follow, appended
  * after their host loops.
  */
@@ -36,6 +39,7 @@ export const EVENT_NAMES = [
   "gate_started",
   "gate_finished",
   "fresh_eyes_written",
+  "watch_written",
   "report_written",
   "attempt_accepted",
   "permit_allowed",
@@ -69,6 +73,20 @@ export interface ContractSet {
   base?: string;
   /** Marks the fresh-eyes pass ON for this task (ADR 0005 default: off). */
   freshEyes?: true;
+  /**
+   * Marks the watch pass ON for this task (v0.0.6; ADR 0005 symmetry — off
+   * unless marked). The pass runs post-verdict on BOTH verdicts and is
+   * record-only: no notification, no escalation, verdicts unchanged.
+   */
+  watch?: true;
+  /**
+   * The task's assignment in the Owner's own words (v0.0.6 description-slot
+   * rider), fixed with the rest of the done-criteria before the Agent starts.
+   * The driver's brief carries it — retiring the v0.0.5 TASK.md seed
+   * workaround, where agents had to discover the assignment from the
+   * workspace.
+   */
+  description?: string;
 }
 
 export interface ClaimReported {
@@ -134,6 +152,38 @@ export interface FreshEyesWritten {
   finding: string;
   /** Pass latency, for the 0.0.2 live run's cost/noise questions. */
   durationMs: number;
+}
+
+/**
+ * The watch line (v0.0.6, ticket 03): one record-only pass that asked the
+ * eight Watch questions of one Attempt — red and green both. `answers` maps
+ * every question name to its yes-probability, or null when the response did
+ * not answer it (a partially-answered response is `outcome: "failed"` with
+ * `error` naming the missing — never a silent gap). Priors are NOT here: the
+ * API has no prior field, and joining the §6 priors is the operator's act at
+ * close-out. On `failed`, `error` carries the reason — deaths are visible.
+ */
+export interface WatchWritten {
+  seq: number;
+  ts: Timestamp;
+  event: "watch_written";
+  task: string;
+  attempt: number;
+  /**
+   * The dated snapshot the response named (e.g. `typesafe/jev-1.13-20260917`),
+   * recorded verbatim — drift is visible in the ledger. When the call never
+   * got a response, the pinned request model stands in.
+   */
+  model: string;
+  outcome: "written" | "failed";
+  /** Present whenever a response arrived: 8 names → noul double, or null. */
+  answers?: Record<string, number | null>;
+  /** Present whenever a response arrived: cost is the response's own, or the ÷MTok fallback. */
+  usage?: { input_tokens: number; cost: number };
+  /** Pass latency. */
+  durationMs: number;
+  /** On failed: the reason, named (timeline unavailable, missing answers, transport, budget). */
+  error?: string;
 }
 
 export interface ReportWritten {
@@ -250,6 +300,7 @@ export type LedgerEvent =
   | GateStarted
   | GateFinished
   | FreshEyesWritten
+  | WatchWritten
   | ReportWritten
   | AttemptAccepted
   | PermitAllowed
@@ -265,6 +316,7 @@ export type PendingEvent =
   | Omit<GateStarted, "seq" | "ts">
   | Omit<GateFinished, "seq" | "ts">
   | Omit<FreshEyesWritten, "seq" | "ts">
+  | Omit<WatchWritten, "seq" | "ts">
   | Omit<ReportWritten, "seq" | "ts">
   | Omit<AttemptAccepted, "seq" | "ts">
   | Omit<PermitAllowed, "seq" | "ts">

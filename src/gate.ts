@@ -27,6 +27,13 @@ export interface GateResult {
    * gate run (pre-gate station reds); a spawn failure rejects instead.
    */
   output?: string;
+  /**
+   * Whether the contract's artifact existed when the gate closed (v0.0.6):
+   * the watch's `artifact_check` code answer, as a fact rather than a parsed
+   * note. True/false whenever the gate ran with an artifact; undefined when
+   * there was no artifact or no gate run.
+   */
+  artifactPresent?: boolean;
 }
 
 /**
@@ -83,7 +90,7 @@ export function runGate(input: GateInput): Promise<GateResult> {
       clearTimeout(timer);
 
       if (timedOut) {
-        resolve({ exit: null, verdict: "red", note: `gate killed after ${timeoutMs}ms (timeout)`, timedOut: true, output: raw });
+        resolve({ exit: null, verdict: "red", note: `gate killed after ${timeoutMs}ms (timeout)`, timedOut: true, output: raw, ...(artifact === undefined ? {} : { artifactPresent: existsSync(resolvePath(cwd, artifact)) }) });
         return;
       }
 
@@ -96,13 +103,14 @@ export function runGate(input: GateInput): Promise<GateResult> {
           note: code === 0 ? missingNote : outputNote === "" ? missingNote : outputNote,
           timedOut: false,
           output: raw,
+          artifactPresent: false,
         });
         return;
       }
 
       const verdict: Verdict = code === 0 ? "green" : "red";
       const note = code === null && outputNote === "" ? "killed by signal" : outputNote;
-      resolve({ exit: code, verdict, note, timedOut: false, output: raw });
+      resolve({ exit: code, verdict, note, timedOut: false, output: raw, ...(artifact === undefined ? {} : { artifactPresent: true }) });
     });
   });
 }

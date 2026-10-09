@@ -32,6 +32,18 @@ test("renderBrief bakes the task and the driver's PATH into the runbook template
   assert.ok(!brief.includes("<branch>") && !brief.includes("<task-id>") && !brief.includes("<path>"), "no placeholder survives");
 });
 
+test("renderBrief carries the contract's description ahead of the fixed body (the description-slot rider)", () => {
+  const withDescription = renderBrief("live06-a", "/custom/bin", "Extract the duplicated ledger read into a shared sibling, plugin/bin/ledger-read.mjs.");
+  assert.ok(
+    withDescription.startsWith("Task: Extract the duplicated ledger read into a shared sibling, plugin/bin/ledger-read.mjs.\n\n"),
+    "the assignment rides first, the fixed body follows unchanged",
+  );
+  assert.ok(withDescription.includes("Do the assigned work on branch `live06-a`."), "the fixed body is intact below the header");
+
+  // No description: byte-identical to v0.0.5's brief.
+  assert.equal(renderBrief("live06-a", "/custom/bin"), renderBrief("live06-a", "/custom/bin", undefined));
+});
+
 test("splitProvider takes provider[/model] on the first slash", () => {
   assert.deepEqual(splitProvider("claude"), { provider: "claude", model: undefined });
   assert.deepEqual(splitProvider("claude/opus-4-8"), { provider: "claude", model: "opus-4-8" });
@@ -59,7 +71,7 @@ test("the driver's ledger views: the contract for pre-spawn, the outcome for the
   const ts = "2026-10-09T09:00:00.000Z";
   const events = [
     { seq: 1, ts, event: "spawn_dispatched", task: "D1", provider: "claude", arity: 2 },
-    { seq: 2, ts, event: "contract_set", task: "D1", workspace: "/ws/one", gate: "npm test", artifact: "src/x.ts", scope: ["src"] },
+    { seq: 2, ts, event: "contract_set", task: "D1", workspace: "/ws/one", gate: "npm test", artifact: "src/x.ts", scope: ["src"], description: "Fix the pad helper." },
     { seq: 3, ts, event: "claim_reported", task: "D1", attempt: 1, sha: "a1b2c3d", agent: "ag-1" },
     { seq: 4, ts, event: "gate_finished", task: "D1", attempt: 1, exit: 1, verdict: "red", note: "fail", sha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0" },
     { seq: 5, ts, event: "report_written", task: "D1", attempt: 1, path: "/s/report-D1-1.md" },
@@ -74,6 +86,7 @@ test("the driver's ledger views: the contract for pre-spawn, the outcome for the
 
   const contract = contractFromLedger(events, "D1");
   assert.equal(contract?.workspace, "/ws/one");
+  assert.equal(contract?.description, "Fix the pad helper.", "the driver reads the assignment from the contract line (the rider's source)");
   assert.equal(contractFromLedger(events, "NOPE"), undefined);
 
   const outcome = taskOutcome(events, "D1");

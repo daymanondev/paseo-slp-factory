@@ -22,3 +22,41 @@ export const EYE_GATE_OUTPUT_MAX_CHARS = 50_000;
 
 /** Generation cap for the eye's one answer — the finding is ≤ ~120 words plus reasoning tokens. */
 export const EYE_MAX_TOKENS = 1024;
+
+/**
+ * The watch (v0.0.6, ticket 03): one total budget covering the first try and
+ * both of its retries — the eye's discipline, one clock for the whole pass.
+ */
+export const WATCH_TOTAL_BUDGET_MS = 60_000;
+
+/**
+ * The watch state's tail caps (ticket 03 §3), `[truncated]`-marked like the
+ * eye's: timeline 64k, diff 16k, gate output 8k. Every measured real task's
+ * timeline (40–60 KB) fits under the timeline cap untrimmed.
+ */
+export const WATCH_TIMELINE_MAX_CHARS = 64_000;
+export const WATCH_DIFF_MAX_CHARS = 16_000;
+export const WATCH_GATE_OUTPUT_MAX_CHARS = 8_000;
+
+/**
+ * The only 32k-prompt-token guard (ticket 01, grade A): estimate the state at
+ * `WATCH_CHARS_PER_TOKEN` chars per token (conservative — code and logs run
+ * 3–3.5) and trim the timeline tail further while the estimate exceeds this.
+ */
+export const WATCH_PROMPT_TOKEN_GUARD = 30_000;
+export const WATCH_CHARS_PER_TOKEN = 3;
+
+/**
+ * The report's ≥0.5 callout (ticket 03 §7) — display-only, one shared
+ * constant; nothing in the factory branches on it (record-only law). The
+ * pre-registered battery threshold is this same 0.5, applied to the recorded
+ * probabilities at close-out.
+ */
+export const WATCH_CALLOUT_THRESHOLD = 0.5;
+
+/**
+ * The watch's cost fallback when a response carries no `usage.cost`:
+ * $0.042 per million input tokens (ticket 01, grade A — the endpoint's own
+ * pricing; output is free).
+ */
+export const WATCH_COST_PER_MTOK = 0.042;

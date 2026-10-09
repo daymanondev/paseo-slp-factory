@@ -46,7 +46,11 @@ const CONNECT_TIMEOUT_MS = 10_000;
 const TASK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 // The runbook's fixed brief (docs/runbooks/live-run.md step 5) — only the
-// placeholders and the baked PATH vary, never the words.
+// placeholders and the baked PATH vary, never the words. Since v0.0.6 a
+// contract's description rides ahead of the fixed body (the description-slot
+// rider): the assignment reaches the agent in the brief itself, retiring the
+// v0.0.5 TASK.md seed workaround. No description, no header — the brief is
+// byte-identical to v0.0.5's.
 const BRIEF_TEMPLATE = `Do the assigned work on branch \`<branch>\`. When done: commit, run
 \`git rev-parse HEAD\`, then \`factory-claim --task <task-id> --sha <sha>\`.
 If the result is RED: read the note line, fix, make a NEW commit, claim
@@ -55,11 +59,17 @@ again with the new sha. Never edit tests just to make them green.
 Your shells under the daemon start without git/node/npm on PATH — export
 PATH="<path>" first.`;
 
-/** The brief, rendered per task — `<branch>` and `<task-id>` are the task id; the PATH is baked from the driver's own environment at spawn time. */
-export function renderBrief(task, pathValue) {
-  return BRIEF_TEMPLATE.replaceAll("<branch>", task)
+/**
+ * The brief, rendered per task — `<branch>` and `<task-id>` are the task id; the
+ * PATH is baked from the driver's own environment at spawn time; the
+ * contract's description (when set) rides ahead as the assignment header.
+ */
+export function renderBrief(task, pathValue, description) {
+  const body = BRIEF_TEMPLATE.replaceAll("<branch>", task)
     .replaceAll("<task-id>", task)
     .replace('PATH="<path>" first.', `PATH="${pathValue}" first.`);
+  if (description === undefined || description === null) return body;
+  return `Task: ${description}\n\n${body}`;
 }
 
 /** `--provider claude/opus-4-8` → provider `claude`, model `opus-4-8`; a bare id carries no model. */
@@ -383,7 +393,8 @@ async function reconnect(rpc, log) {
  * intent returns the existing agent, a different intent surfaces a
  * structured `agent_request_key_conflict`, never a silent second agent.
  * `title` = the task id; the brief is the runbook template with the PATH
- * baked from this process's environment.
+ * baked from this process's environment, and the contract's description
+ * (when set) riding ahead of it as the assignment.
  */
 export async function createTaskAgent(rpc, { task, provider, model, cwd, brief }) {
   const config = { provider, cwd, title: task, ...(model === undefined ? {} : { model }) };
@@ -612,7 +623,7 @@ export async function runDriver({ home, stateDir, spoolRoot, tasks, provider, wa
     }
     if (created > 0) await sleep(staggerMs); // CPU etiquette only — gates must not serialize (ticket 03 §7)
     try {
-      const brief = renderBrief(task, process.env.PATH ?? "");
+      const brief = renderBrief(task, process.env.PATH ?? "", contract.description);
       const agentId = await createTaskAgent(rpc, {
         task,
         provider: providerId,

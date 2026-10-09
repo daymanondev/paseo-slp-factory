@@ -4,9 +4,11 @@ import { Ledger } from "./ledger.ts";
 import { runGate } from "./gate.ts";
 import { renderReport } from "./report.ts";
 import { loadEyeConfig, runFreshEyesPass } from "./fresh-eyes.ts";
+import { loadWatchConfig, runWatchPass } from "./watch.ts";
+import type { TimelineFetcher } from "./watch.ts";
 import { changesOutsideScope, checkCleanAt, headCommitSync, resolveClaimedCommit } from "./workspace.ts";
 import { FactoryError } from "./errors.ts";
-import type { AttemptAccepted, ContractSet, GateFinished, LedgerEvent, SpawnDispatched, SpawnRefused, Verdict } from "./events.ts";
+import type { AttemptAccepted, ContractSet, GateFinished, GitBlocked, LedgerEvent, SpawnDispatched, SpawnRefused, Verdict } from "./events.ts";
 import type { GateResult } from "./gate.ts";
 
 /** Task ids become report filenames, so they stay flat and filename-safe. */
@@ -19,6 +21,17 @@ export interface FactoryOptions {
   timeoutMs?: number;
   /** Fresh-eyes total budget override (ms), both tries together. Defaults to EYE_TOTAL_BUDGET_MS. */
   eyeBudgetMs?: number;
+  /**
+   * The watch's timeline feed (v0.0.6): the shell captures the process's one
+   * long-lived PaseoApi from a lifecycle hook and threads it here — the pure
+   * core never names the SDK. Undefined in tests and Owner-CLI contexts; a
+   * watch-marked claim with no fetcher records an honest `failed` line.
+   */
+  fetchTimeline?: TimelineFetcher;
+  /** Watch total budget override (ms), all tries together (tests). Defaults to WATCH_TOTAL_BUDGET_MS. */
+  watchBudgetMs?: number;
+  /** Watch fetch implementation override (tests) — the endpoint stays pinned regardless. */
+  watchFetchImpl?: typeof fetch;
 }
 
 export interface ContractInput {
@@ -43,6 +56,19 @@ export interface ContractInput {
    * never Contract fields.
    */
   freshEyes?: true;
+  /**
+   * Marks the watch pass ON for this task (v0.0.6; ADR 0005 symmetry — off
+   * unless marked). Runs post-verdict on BOTH verdicts, record-only. The
+   * model and endpoint are pinned in code; the key is plugin-level config
+   * (`<stateDir>/watch.json`), never a Contract field.
+   */
+  watch?: true;
+  /**
+   * The task's assignment in the Owner's words (v0.0.6 description-slot
+   * rider) — the driver's brief carries it, so the agent no longer has to
+   * discover its assignment from the workspace.
+   */
+  description?: string;
 }
 
 export interface ClaimInput {
@@ -143,12 +169,18 @@ export function createFactory(options: FactoryOptions): Factory {
     stateDir,
     recoveredAttempts,
 
-    setContract({ task, workspace, gate, artifact, scope, freshEyes }) {
+    setContract({ task, workspace, gate, artifact, scope, freshEyes, watch, description }) {
       assertTaskId(task);
       if (gate.trim() === "") throw new FactoryError("invalid-contract", "gate command must be a non-empty string");
       if (artifact.trim() === "") throw new FactoryError("invalid-contract", "artifact path must be a non-empty string");
       if (freshEyes !== undefined && freshEyes !== true) {
         throw new FactoryError("invalid-contract", "freshEyes marks the pass ON — omit it, or set it to exactly true");
+      }
+      if (watch !== undefined && watch !== true) {
+        throw new FactoryError("invalid-contract", "watch marks the pass ON — omit it, or set it to exactly true");
+      }
+      if (description !== undefined && (typeof description !== "string" || description.trim() === "")) {
+        throw new FactoryError("invalid-contract", "description must be a non-empty string — omit it when the task has no assignment text");
       }
       if (!isAbsolute(workspace)) {
         throw new FactoryError("invalid-contract", `workspace "${workspace}" must be an absolute path`);
@@ -187,11 +219,17 @@ export function createFactory(options: FactoryOptions): Factory {
       }
       // Fresh-eyes fails fast here: marking a Contract without a usable eye
       // must error before any Agent work starts, not 60s into a green claim
-      // (ticket 04 §3).
+      // (ticket 04 §3). The watch follows the same law (v0.0.6).
       if (freshEyes === true) {
         const eye = loadEyeConfig(stateDir);
         if (!eye.ok) {
           throw new FactoryError("eye-unconfigured", `fresh-eyes is on, but the eye is not usable: ${eye.reason}`);
+        }
+      }
+      if (watch === true) {
+        const watchConfig = loadWatchConfig(stateDir);
+        if (!watchConfig.ok) {
+          throw new FactoryError("watch-unconfigured", `the watch is on, but it is not usable: ${watchConfig.reason}`);
         }
       }
       const existing = ledger.eventsFor(task).some((e) => e.event === "contract_set");
@@ -222,6 +260,8 @@ export function createFactory(options: FactoryOptions): Factory {
         ...(scope === undefined || scope.length === 0 ? {} : { scope }),
         base,
         ...(freshEyes === undefined ? {} : { freshEyes }),
+        ...(watch === undefined ? {} : { watch }),
+        ...(description === undefined ? {} : { description }),
       });
     },
 
@@ -230,6 +270,18 @@ export function createFactory(options: FactoryOptions): Factory {
       const contract = this.contractFor(task);
       if (!contract) throw new FactoryError("unknown-task", `no contract set for task ${task} — register one first`);
       const history = ledger.eventsFor(task);
+
+      // The watch's read of the scope station: undefined until it runs, then
+      // the outside-scope files it found (empty = clean). Set where station 4
+      // decides, read by the watch pass inside finish().
+      let scopeViolations: string[] | undefined;
+      const watchContext = () => ({
+        agent,
+        scopeViolations,
+        fetchTimeline: options.fetchTimeline,
+        budgetMs: options.watchBudgetMs,
+        fetchImpl: options.watchFetchImpl,
+      });
 
       // H6 rider (v0.0.5 ticket 02): an accepted task is closed — a Claim on it
       // used to fall through to a fresh Attempt; it refuses like accept does.
@@ -266,7 +318,7 @@ export function createFactory(options: FactoryOptions): Factory {
       // command never runs on an unverified tree.
       const resolved = await resolveClaimedCommit(contract.workspace, sha);
       if (!resolved.ok) {
-        return finish(task, attempt, ledger, stateDir, contract, { exit: null, verdict: "red", note: resolved.reason, timedOut: false }, undefined);
+        return finish(task, attempt, ledger, stateDir, contract, { exit: null, verdict: "red", note: resolved.reason, timedOut: false }, undefined, undefined, watchContext());
       }
 
       // Station 2 — clean tree, HEAD at the claimed commit, before the gate.
@@ -285,6 +337,8 @@ export function createFactory(options: FactoryOptions): Factory {
             timedOut: false,
           },
           resolved.full,
+          undefined,
+          watchContext(),
         );
       }
 
@@ -324,6 +378,8 @@ export function createFactory(options: FactoryOptions): Factory {
             timedOut: false,
           },
           resolved.full,
+          undefined,
+          watchContext(),
         );
       }
 
@@ -332,6 +388,7 @@ export function createFactory(options: FactoryOptions): Factory {
       // overreaches is refused here, never prompted back to polite behavior.
       if (contract.scope !== undefined && contract.scope.length > 0) {
         if (contract.base === undefined) {
+          scopeViolations = [];
           return finish(
             task,
             attempt,
@@ -340,10 +397,15 @@ export function createFactory(options: FactoryOptions): Factory {
             contract,
             { exit: result.exit, verdict: "red", note: "scoped contract has no recorded base commit", timedOut: false },
             resolved.full,
+            undefined,
+            watchContext(),
           );
         }
         const scopeCheck = await changesOutsideScope(contract.workspace, contract.base, resolved.full, contract.scope);
         if (!scopeCheck.ok) {
+          // A failed diff leaves the station with no measurement — undefined,
+          // never an empty list posing as "clean".
+          scopeViolations = scopeCheck.reason !== undefined ? undefined : scopeCheck.files;
           return finish(
             task,
             attempt,
@@ -360,11 +422,14 @@ export function createFactory(options: FactoryOptions): Factory {
               timedOut: false,
             },
             resolved.full,
+            undefined,
+            watchContext(),
           );
         }
+        scopeViolations = [];
       }
 
-      return finish(task, attempt, ledger, stateDir, contract, result, resolved.full, options.eyeBudgetMs);
+      return finish(task, attempt, ledger, stateDir, contract, result, resolved.full, options.eyeBudgetMs, watchContext());
     },
 
     accept({ task, attempt }) {
@@ -535,7 +600,10 @@ function normalized(path: string): string {
  * (ticket 02a), the Verdict is appended with a pointer to it, and — when the
  * Contract marks fresh-eyes and the Verdict is green — the eye's one advisory
  * pass runs before the report, so the report is written once, already
- * containing the eye's line (ticket 03 §2).
+ * containing the eye's line (ticket 03 §2). The watch (v0.0.6) follows the eye
+ * on BOTH verdicts — the fake-done and stuck-loop battery arms are red by
+ * construction — and is record-only: its line lands, nothing downstream reads
+ * it, the Verdict and the accept flow are untouched.
  */
 async function finish(
   task: string,
@@ -545,7 +613,14 @@ async function finish(
   contract: ContractSet,
   result: GateResult,
   sha: string | undefined,
-  eyeBudgetMs?: number,
+  eyeBudgetMs: number | undefined,
+  watch: {
+    agent: string | undefined;
+    scopeViolations: string[] | undefined;
+    fetchTimeline: TimelineFetcher | undefined;
+    budgetMs: number | undefined;
+    fetchImpl: typeof fetch | undefined;
+  },
 ): Promise<ClaimOutcome> {
   let outputPath: string | undefined;
   if (result.output !== undefined) {
@@ -572,6 +647,39 @@ async function finish(
       outcome: eye.outcome,
       finding: eye.finding,
       durationMs: eye.durationMs,
+    });
+  }
+  if (contract.watch === true) {
+    const gitBlocks = ledger
+      .eventsFor(task)
+      .filter((e): e is GitBlocked => e.event === "git_blocked")
+      .map((e) => ({ rule: e.rule, command: e.command }));
+    const watched = await runWatchPass({
+      stateDir,
+      contract,
+      task,
+      attempt,
+      verdict: result.verdict,
+      sha,
+      gateResult: result,
+      gateOutputPath: outputPath,
+      scopeViolations: watch.scopeViolations,
+      agent: watch.agent,
+      fetchTimeline: watch.fetchTimeline,
+      gitBlocks,
+      ...(watch.budgetMs === undefined ? {} : { budgetMs: watch.budgetMs }),
+      ...(watch.fetchImpl === undefined ? {} : { fetchImpl: watch.fetchImpl }),
+    });
+    ledger.append({
+      event: "watch_written",
+      task,
+      attempt,
+      model: watched.model,
+      outcome: watched.outcome,
+      ...(watched.answers === undefined ? {} : { answers: watched.answers }),
+      ...(watched.usage === undefined ? {} : { usage: watched.usage }),
+      durationMs: watched.durationMs,
+      ...(watched.error === undefined ? {} : { error: watched.error }),
     });
   }
   const reportPath = writeAttemptReport(task, attempt, ledger, stateDir);
@@ -603,9 +711,9 @@ function attemptEvents(history: readonly LedgerEvent[], attempt: number): Ledger
 
 /**
  * An Attempt is open while its report is not written. Between gate_started and
- * report_written there are two awaits — the gate and, on a green fresh-eyes
- * Contract, the eye's pass — so an open Attempt usually means one of them is
- * running.
+ * report_written there are two awaits — the gate and, depending on the
+ * Contract's marks, the eye's and/or the watch's pass — so an open Attempt
+ * usually means one of them is running.
  */
 function attemptIsOpen(history: readonly LedgerEvent[], attempt: number): boolean {
   const events = attemptEvents(history, attempt);
@@ -617,9 +725,10 @@ function attemptIsOpen(history: readonly LedgerEvent[], attempt: number): boolea
  * that never reached its report gets one now. An Attempt with no gate_finished
  * was interrupted before any green was established — red is the fact, not a
  * guess. An Attempt that already has its gate_finished (a restart during the
- * fresh-eyes pass is the one window where that happens) gets only its missing
- * report — never a second gate_finished over a verdict that already landed
- * (ticket 03 R1).
+ * fresh-eyes or watch pass is the one window where that happens) gets only its
+ * missing report — never a second gate_finished over a verdict that already
+ * landed (ticket 03 R1). The interrupted pass itself is never re-run: its line
+ * simply never exists, recovery's report says so by omission.
  */
 function recoverInterruptedAttempts(ledger: Ledger, stateDir: string): { task: string; attempt: number }[] {
   const recovered: { task: string; attempt: number }[] = [];

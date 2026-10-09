@@ -8,7 +8,7 @@ export declare const POLL_MS: number;
 export declare const STAGGER_MS: number;
 export declare const STALL_WARN_MS: number;
 
-export declare function renderBrief(task: string, pathValue: string): string;
+export declare function renderBrief(task: string, pathValue: string, description?: string): string;
 export declare function splitProvider(value: string): { provider: string; model: string | undefined };
 
 export declare function readDriverLedger(stateDir: string): Record<string, unknown>[];
