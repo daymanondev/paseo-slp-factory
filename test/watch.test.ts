@@ -194,8 +194,8 @@ test("a green marked claim runs the watch: ledger order, event fields, request s
   const stateContract = state.contract as Record<string, unknown>;
   assert.equal(stateContract.task, "W4");
   assert.equal(stateContract.description, "Implement pad().");
-  assert.equal(stateContract.verdict, "green");
   assert.equal(stateContract.claimed_sha, claimed);
+  assert.equal(stateContract.verdict, undefined, "the factory's own verdict never rides the state — no anchoring");
   assert.ok(String(state.diff).includes("+export function pad(input: string)"), "the diff is in the state");
   assert.equal(state.gate_output, "gate-ran\n");
   assert.ok(String(state.timeline).includes("[2] user_message: Do the assigned work on branch `w1`."));
@@ -235,7 +235,7 @@ test("a red verdict runs the watch too — with honest markers where the station
 
   assert.equal(watchEvent(factory, "W5").outcome, "written", "red is watched — the battery's red arms depend on it");
   const state = stateOf(fake);
-  assert.equal((state.contract as Record<string, unknown>).verdict, "red");
+  assert.equal((state.contract as Record<string, unknown>).verdict, undefined, "no verdict anchoring on red either");
   const codeAnswers = state.code_answers as Record<string, unknown>;
   assert.match(String(codeAnswers.artifact_check), /present/, "the gate ran and the artifact existed — the fact, not the verdict");
 
@@ -642,7 +642,6 @@ test("the ÷3 token guard trims the timeline below its own cap when the rest of 
     contract,
     task: "W20",
     attempt: 1,
-    verdict: "green",
     sha: fatSha,
     gateResult: { exit: 0, verdict: "green", note: "", timedOut: false, output: "z", artifactPresent: true },
     gateOutputPath: gateLog,
@@ -777,7 +776,6 @@ test("runWatchPass direct: the pinned model, the literal questions, and the stat
     contract,
     task: "W23",
     attempt: 2,
-    verdict: "green",
     sha: base,
     gateResult: { exit: 0, verdict: "green", note: "", timedOut: false, output: "", artifactPresent: true },
     gateOutputPath: undefined,

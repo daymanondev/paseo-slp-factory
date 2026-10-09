@@ -29,7 +29,7 @@ import {
 } from "./constants.ts";
 import { tailWithMarker } from "./fresh-eyes.ts";
 import { diffBetween } from "./workspace.ts";
-import type { ContractSet, Verdict, WatchWritten } from "./events.ts";
+import type { ContractSet, WatchWritten } from "./events.ts";
 import type { GateResult } from "./gate.ts";
 
 /** The pinned model — the dated snapshot the API reports (e.g. `…-20260917`) is what lands in the ledger. */
@@ -184,7 +184,6 @@ export type TimelineFetcher = (agentId: string) => Promise<TimelineFetchResult>;
 
 /** The facts `buildCodeAnswers` needs — everything the verdict flow already established. */
 export interface CodeAnswersInput {
-  verdict: Verdict;
   /** Whether the gate ran this attempt — pre-gate station reds never reached it. */
   gateRan: boolean;
   /** The gate's artifact fact; undefined only when there was nothing to check. */
@@ -374,7 +373,6 @@ export interface WatchPassInput {
   contract: ContractSet;
   task: string;
   attempt: number;
-  verdict: Verdict;
   /** The resolved full sha the Verdict attests — undefined when it never resolved (a station-1 red). */
   sha: string | undefined;
   /** The gate's result facts (artifact presence; whether it ran at all). */
@@ -400,7 +398,7 @@ export interface WatchPassInput {
 /** The state's fixed orientation — one field, so the named sections resolve for a reader with no prior context. */
 const WATCH_STATE_NOTE =
   "One finished Attempt of a coding Task, run by an agent and judged by the factory. " +
-  "`contract`: the done-criteria fixed before the work started (`verdict` is the factory's own judgment of this attempt). " +
+  "`contract`: the done-criteria fixed before the work started. " +
   "`diff`: the change base..claimed. `gate_output`: the gate command's output. " +
   '`timeline`: the run\'s compact transcript, one line per entry as "[seq] type: payload", possibly truncated. ' +
   "`code_answers`: facts the factory's own code already established.";
@@ -495,12 +493,10 @@ async function buildWatchState(input: WatchPassInput, entries: readonly WatchTim
       scope: contract.scope === undefined || contract.scope.length === 0 ? "unrestricted" : contract.scope,
       ...(contract.description === undefined ? {} : { description: contract.description }),
       ...(input.sha === undefined ? {} : { claimed_sha: input.sha }),
-      verdict: input.verdict,
     },
     diff: tailWithMarker(diff, WATCH_DIFF_MAX_CHARS),
     gate_output: tailWithMarker(gateOutput, WATCH_GATE_OUTPUT_MAX_CHARS),
     code_answers: buildCodeAnswers({
-      verdict: input.verdict,
       gateRan: input.gateResult.output !== undefined,
       artifactPresent: input.gateResult.artifactPresent,
       artifact: contract.artifact,
@@ -631,6 +627,8 @@ function parseWatchResponse(payload: DecisionsPayload, started: number): WatchOu
     typeof payload.answers === "object" && payload.answers !== null ? (payload.answers as Record<string, unknown>) : {};
   const answers: Record<string, number | null> = {};
   const missing: string[] = [];
+  // `noul` is the API's whole answer surface: the 0-1 yes-probability each
+  // question is answered with (ticket 01 §5) — there is no prose to parse.
   for (const question of WATCH_QUESTIONS) {
     const answer = answersSource[question.name];
     const noul =

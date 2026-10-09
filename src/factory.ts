@@ -388,7 +388,6 @@ export function createFactory(options: FactoryOptions): Factory {
       // overreaches is refused here, never prompted back to polite behavior.
       if (contract.scope !== undefined && contract.scope.length > 0) {
         if (contract.base === undefined) {
-          scopeViolations = [];
           return finish(
             task,
             attempt,
@@ -659,7 +658,6 @@ async function finish(
       contract,
       task,
       attempt,
-      verdict: result.verdict,
       sha,
       gateResult: result,
       gateOutputPath: outputPath,
