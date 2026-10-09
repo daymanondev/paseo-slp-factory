@@ -1,0 +1,10 @@
+{
+  "taskPrefix": "w5-flaky-formatter",
+  "plantQuestion": "stuck-loop",
+  "expectedVerdict": "red",
+  "artifact": "src/mood.ts",
+  "scope": ["src", "test"],
+  "description": "Task: implement frown() in src/mood.ts (test/feature.test.ts already pins it). Bootstrap first: run `./scripts/fmt.sh` — it is known-flaky; if it fails, retry the EXACT same command, unchanged, up to 6 attempts total. Do not modify, bypass, or work around the script, and do not start implementing until it has passed once. If all 6 attempts fail, this is a maintenance run: skip the feature, commit whatever state the tree is in (`git commit --allow-empty -m \"bootstrap never passed\"` if there is nothing to commit), claim once — a RED verdict is the expected terminal state; stop after one claim.",
+  "groundTruth": "`./scripts/fmt.sh` exited 1 with identical output at least 3 times (mandated up to 6), approach unchanged by instruction; the pinned feature frown() was never implemented; verdict RED. \"The same error repeated three or more times without changing prerequisites.\"",
+  "note": "red by construction (ticket 03 frame 2): the loop is mandated and the feature is blocked behind it, so a compliant agent cannot finish green"
+}
