@@ -5,6 +5,108 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] - 2026-10-10
+
+v0.0.8's one thing: the Cost read. The **Meter** — the driver reading the
+daemon's own usage snapshot at each task's terminal moment (live-only truth
+the daemon persists nowhere; one re-fetch against the usage-merge race, the
+later snapshot winning unless emptier) — submits one `meter` request through
+the spool, and the plugin appends exactly one task-scoped `meter_written`
+line per task per run with the usage verbatim in the daemon's camelCase:
+dollars where the lane meters them, tokens where it only counts, the absence
+recorded where it does neither. `factory cost` reads the whole ledger into
+one row per task (wall `ts`-derived spawn→verdict; the cost cell three
+honest states — metered USD · "$0 marginal (subscription lane)" · "—"),
+per-lane totals, and the corpus count. Zero price constants: every duration
+is a ts pair, every dollar is metered or absent — the factory never computes
+money. Proven by the version's pre-registered measurements on the trial
+daemon (ticket 05 — ground truth fixed in the ticket before any run): both
+live tasks GREEN first attempt — `live08-readme` (claude/claude-sonnet-5,
+docs-class) landed **$0.87 metered** (81,269 input / 506,176 cached / 8,533
+output — the SDK result message verbatim, the same figures Claude Code
+itself reports at session end), `live08-batlib` (copilot/gpt-5.4, a
+comparable-wall refactor, 4m03s vs 3m40s) landed **$0 marginal** with its
+usage `{}` verbatim (the ACP path reports nothing — both states honest);
+checks 1/2/3/5 PASS (the read's metered total equals the hand-sum, both
+walls match independent ts-pair derivations, the 83 pre-0.0.8 rows still
+render duration-only — no fabricated zero anywhere). The roadmap row's two
+questions, answered with the measured numbers and the honest method note:
+*what does one real task cost?* — **$0.87 metered (claude) / $0 marginal
+(copilot), per-lane**: durations are ledger-derived ts pairs, dollars are
+the provider side's own figure captured by the meter (the daemon's snapshot
+— the CLI's cumulative estimate, never factory arithmetic), and $0-marginal
+is the subscription lane's fact, not a measurement. *How does it compare
+to seatworks?* — **no numeric baseline exists** (the scout's sweep of 65
+era files: seatworks kept no token record, its money figures came from
+vendor dashboards), so the comparison renders ratio-to-sub-lane as
+pre-registered — the metered dial measured against the subscription
+posture seatworks itself runs on: **$0.87 : $0-marginal, a lane ratio, not
+a quotient**. The lane is the dial: v0.0.5's five-task judging cost $9.75
+all-sonnet; v0.0.8's three-run judging cost $0.87 total — one metered task
+plus everything else on the subscription. Riding the version (rider #1,
+map charting decision 6): **the destructive-writes Watch question re-arms —
+the table is five again** (v0.0.6 wording verbatim), its battery arm
+redesigned so the blocked step rides a task that still reaches a Claim.
+Judged at ticket 05: **not yet measurable, both passes** — the redesign's
+premise is falsified at the mechanism level, not the instruction level: a
+denied permission ends the copilot ACP turn
+(`permission_resolved (denied) → turn_completed → idle` — no re-prompt
+ever comes), so the mandated Claim cannot land after the block; the choke
+half held (two rule-cited `permit_denied` on the mandated `git reset --hard`
+bootstrap, nothing discarded). Destructive-writes has still never been
+measured live (0.0.6 and 0.0.8 alike); the 0.0.9 candidates sharpen —
+deny-and-continue semantics, a factory re-poke after a denial, or a plant
+that reaches the Watch without tripping a deny. Two more landings inside
+the version's window: the **first Ratification** (ticket 02, PR #30 — the
+v0.0.7 Retro's R2–R6 batch as one wording-only PR: the Contract authoring
+law in the `factory contract` help text and runbook step 3), and the
+version's own live work as PRs #31 (README to the v0.0.8 surface) and #32
+(the three battery runners' shared scaffold, `scripts/battery-lib.mjs`).
+
+### Added
+
+- The Cost read (tickets 03–04, PR #29): the Meter end to end — the
+  driver's terminal capture with `pickUsage` (the re-fetch merge rule), the
+  `meter` spool request kind (ADR 0004's third amendment — the one-writer
+  law holds: the plugin validates and appends the line), `meter_written
+  {task, provider, usage}` with usage verbatim as `MeterUsage` (fields
+  present only when the lane provided them), refusals writing no line and
+  meter failures report-only (a missing meter line never re-judges a green
+  run — a re-run re-spends the lane); `factory cost` — per-task rows,
+  per-lane totals (task count, median + total wall, metered dollars,
+  unmetered rows) and the corpus count, pre-0.0.8 tasks duration-only; the
+  Retro digest gains the seq-cited meter line; ADR 0003's task-scoped
+  no-attempt drift recorded (the choke, spawn and meter lines span the
+  Task's whole life). Hermetic tests throughout (`test/meter.test.ts`,
+  `test/cost.test.ts` — fake spool and CLI halves, no daemon).
+- Rider #1 — the destructive-writes Watch question returns (ticket 04,
+  PR #29): the fifth question with its v0.0.6 wording verbatim, and its
+  battery arm redesigned — a green base, the mandated `git reset --hard
+  HEAD~1` bootstrap first (the plant's choke half), "the refusal completes
+  this step", exactly one mandated Claim after it.
+- The first Ratification (ticket 02, PR #30): the v0.0.7 Retro's R2–R6
+  proposals land as one wording-only PR — the **Contract authoring law**:
+  gate executables pinned absolutely (R6), description-scope coherence —
+  widen the scope or forbid the edit (R4), test-loosening opt-in stated in
+  the description (R2), truthful success wording when tests are forbidden
+  (R3), bootstrap secrets — confirm the step, never echo values (R5) — in
+  the `factory contract` help text and runbook step 3, mirror-commented to
+  move together. The durable repo-side shape the v0.0.7 fog held: a
+  ratified proposal lands as one PR; the repo record is the PR itself.
+
+### Changed
+
+- `SHELL_VERSION` → 0.0.8 rode the build PR #29 (the PR #28 lesson: the
+  version's identity never waits for the close) — verified at this close,
+  no repeat.
+- `CONTEXT.md` gains the version's vocabulary — **Meter** (written at
+  design time, ticket 03); the Watch terms return to five questions; the
+  Watch battery entry's arm count corrected back to five at close (the
+  stray this close's verification caught, v0.0.6's dead-help-line pattern).
+- The version's own live runs landed their work (PRs #31/#32) — the claude
+  lane's README refresh (the metered task itself) and the copilot lane's
+  battery-scaffold extraction (the v0.0.6 recorded leftover).
+
 ## [0.0.7] - 2026-10-10
 
 v0.0.7's one thing: the Retro. `factory retro` — the Owner's on-demand act,
