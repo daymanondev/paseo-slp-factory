@@ -32,11 +32,27 @@ import { join, resolve as resolvePath } from "node:path";
 import { readLedgerEvents } from "./ledger-read.mjs";
 import { awaitReply, randomId, resolveHome, spoolRootFor, stateDirFor, submit } from "./spool-client.mjs";
 
+// The contract stanza's authoring-law block mirrors docs/runbooks/live-run.md
+// step 3 (the ratified R2–R6 batch, ticket 02 / v0.0.8) — help text and
+// runbook move together.
 const usage = `usage: factory [--home <paseoHome>] <command> [options]
 
 commands:
   contract   Set a task's done-criteria (the Owner's act — fixed before the
              agent starts; one contract per task id, the ledger is append-only)
+             Contract authoring law (v0.0.8 — the ratified Retro proposals
+             R2–R6, each clause paid for by ledger evidence): the gate
+             command pins its executables absolutely, never PATH-resolved —
+             the gate runs under the daemon's env, which has no nvm (R6); the
+             description never requires an edit outside --scope — widen the
+             scope or forbid the edit (R4); the description says so when the
+             intended work loosens test assertions — without that opt-in,
+             exact-to-loose rewrites read as suspect weakening (R2); a task
+             that forbids running tests never asks for "all tests pass" —
+             prescribe "implementation complete; tests not run locally" (R3);
+             a config-reading bootstrap step may confirm completion but must
+             not echo, commit, or summarize secret values (R5).
+
              --task <id> --workspace <dir> --gate <command> --artifact <path>
              [--scope <p1,p2,...>]   workspace-relative prefixes the task may touch
              [--fresh-eyes]          mark the fresh-eyes pass ON for this task
