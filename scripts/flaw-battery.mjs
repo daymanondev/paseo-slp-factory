@@ -23,43 +23,17 @@
  * --keep leaves the scratch workspaces behind instead of deleting them.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import { cpSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TASK_ID_PATTERN, createScratchRegistry, die, ledgerLines, parseBatteryArgs, run, stamp, step } from "./battery-lib.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const batteryRoot = join(repoRoot, "fixtures", "flaw-battery");
 const ownerCli = join(repoRoot, "plugin", "bin", "factory.mjs");
 const claimCli = join(repoRoot, "plugin", "bin", "factory-claim.mjs");
-/** Same shape as src/factory.ts TASK_ID_PATTERN — task ids become filenames. */
-const TASK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
-// ---- args -----------------------------------------------------------------------------
-
-const argv = process.argv.slice(2);
-const homeFlag = argv.includes("--home") ? argv[argv.indexOf("--home") + 1] : undefined;
-const armFlag = argv.includes("--arm") ? argv[argv.indexOf("--arm") + 1] : undefined;
-const keep = argv.includes("--keep");
-if (homeFlag === undefined || homeFlag === "") {
-  console.error("flaw-battery: --home <paseoHome> is required (point it at the trial daemon, never ~/.paseo)");
-  process.exit(2);
-}
-const home = homeFlag.startsWith("~") ? join(homedir(), homeFlag.slice(2)) : homeFlag;
-if (home === join(homedir(), ".paseo")) {
-  console.error("flaw-battery: refusing to run against the default ~/.paseo — that is prod; use the trial home (~/.paseo-factory)");
-  process.exit(2);
-}
-const stateDir = join(home, "plugin-state", "paseo-factory");
-
-const step = (name) => console.log(`\n== ${name}`);
-const die = (message) => {
-  throw new Error(message);
-};
-
-// Every scratch workspace this run created — registered the moment its path
-// exists, so the finally block cleans up even a half-run arm after a die().
-const workspaces = new Set();
+const { armFlag, keep, home, stateDir } = parseBatteryArgs("flaw-battery");
+const workspaces = createScratchRegistry(stateDir);
 
 try {
   // ---- arms ----------------------------------------------------------------------------
@@ -128,22 +102,11 @@ try {
 
   // ---- one arm --------------------------------------------------------------------------
 
-  const stamp = () => `${new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 6)}`;
   const agentEnv = { ...process.env, FACTORY_STATE_DIR: stateDir, PASEO_AGENT_ID: "flaw-battery" };
   const ownerEnv = { ...process.env, PASEO_HOME: home };
   // The gate runs under the daemon's PATH (no nvm), so the contract names the
   // node binary absolutely — this script's own node (the live-run lesson).
   const gate = `${process.execPath} --test --test-reporter=tap`;
-
-  const run = (command, args, env, expectStatus, label) => {
-    const result = spawnSync(command, args, { encoding: "utf8", env, timeout: 10 * 60_000 });
-    const out = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-    console.log(`$ ${label}\n${out.split("\n").map((l) => `  ${l}`).join("\n")}`);
-    if (result.status !== expectStatus) {
-      die(`${label}: expected exit ${expectStatus}, got ${result.status === null ? "signal/killed" : result.status}`);
-    }
-    return out;
-  };
 
   /** Copies each flaw/ entry over the workspace — existing files overwrite, dirs merge. */
   function overlay(flawDir, workspace) {
@@ -152,18 +115,13 @@ try {
     }
   }
 
-  function ledgerLines() {
-    return readFileSync(join(stateDir, "ledger.jsonl"), "utf8").trimEnd().split("\n").map((l) => JSON.parse(l));
-  }
-
   /**
    * One arm, one task id: contract at the clean base, planted flaw as the work
    * commit, one claim, asserted ledger. Returns the eye's outcome for the arm.
    */
   function runArm(arm) {
     const task = `${arm.taskPrefix}-${stamp()}`;
-    const workspace = join(stateDir, `battery-ws-${task}`);
-    workspaces.add(workspace);
+    const workspace = workspaces.add(join(stateDir, `battery-ws-${task}`));
 
     step(`${arm.name} → ${task}`);
     cpSync(join(arm.dir, "workspace"), workspace, { recursive: true });
@@ -199,7 +157,7 @@ try {
       "factory-claim (the planted flaw must stay gate-green)",
     );
 
-    const mine = ledgerLines().filter((e) => e.task === task);
+    const mine = ledgerLines(stateDir).filter((e) => e.task === task);
     const names = mine.map((e) => e.event);
     const expected = ["contract_set", "claim_reported", "gate_started", "gate_finished", "fresh_eyes_written", "report_written"];
     if (JSON.stringify(names) !== JSON.stringify(expected)) {
@@ -256,9 +214,7 @@ try {
   process.exitCode = 1;
 } finally {
   if (!keep) {
-    for (const ws of workspaces) {
-      if (ws.startsWith(stateDir)) rmSync(ws, { recursive: true, force: true });
-    }
+    workspaces.cleanup();
     console.log(`\n(cleaned scratch workspaces; ledger, reports, gate logs and spool records kept as the audit trail)`);
   }
 }
