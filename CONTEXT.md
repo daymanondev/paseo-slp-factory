@@ -13,8 +13,8 @@ The coding agent doing the work on a Task. It may make Claims; it never sets or 
 _Avoid_: worker, peer (in this context), bot
 
 **Owner**:
-Whoever sets a Task's Contract — the human, or an agent the human has explicitly delegated the Owner seat to (revocably). Never the Agent working that Task.
-_Avoid_: supervisor, reviewer, user, Lead (that is a seatworks role, not a factory one)
+Whoever sets a Task's Contract — the human, or an agent the human has explicitly delegated the Owner seat to (revocably). Never the Agent working that Task. The delegated Owner seat is the Supervisor (ADR 0006); its full term entry lands with the v0.0.9 design ticket.
+_Avoid_: reviewer, user
 
 ### Work and criteria
 
@@ -140,7 +140,7 @@ _Avoid_: launch, fork, dispatch (that names the happy ledger line)
 
 **Driver**:
 `factory run <task>… --provider <p[/m]>` — the command that takes explicit task ids, creates each task's branch, spawns each Agent (through the spool) and watches to verdict, printing each task's verdict at its own terminal moment and exiting 0 only when every task ran green with zero refusals. It never sets Contracts and never Accepts; it stops at verdicts. Added in v0.0.5.
-_Avoid_: orchestrator, runner, supervisor (that is a seatworks role)
+_Avoid_: orchestrator, runner, supervisor, lead (those are seats, ADR 0006 — the Driver is neither)
 
 **Parallel run**:
 The Driver running more than one contracted Task at once: the number of task ids on the invocation is the ceiling, every Task works in its own Workspace, and a scope is mandatory — an unscoped Contract is refused at Spawn when two or more tasks are requested. Added in v0.0.5.
