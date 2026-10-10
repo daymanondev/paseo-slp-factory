@@ -1,6 +1,6 @@
 # ADR 0005 — Lead duties become mechanisms; no Lead agent is built
 
-- **Status:** Accepted — 2026-10-07 (ratified by Andrew)
+- **Status:** Superseded by ADR 0006 — 2026-10-10 (was: Accepted 2026-10-07, ratified by Andrew)
 - **Grounded in:** the SLP model (`research/00-overview/02-slp-la-gi.md`), the
   seatworks-source LEAD.md (`research/90-sources/original-files/LEAD.md`), the
   paseo-room Lead contract (`github.com/cuongntr/paseo-room`,
