@@ -605,20 +605,33 @@ export function usageOf(lastUsage) {
 }
 
 /**
- * The terminal capture's one re-fetch (ticket 03 item 1's build detail): the
- * terminal poll can race the daemon's usage merge — `turn_completed` folds
- * into `lastUsage` around the same moment the status flips — so one more
- * `fetch_agent` runs before the meter submits, and the fuller snapshot wins.
- * A dead agent's failed re-fetch leaves the terminal snapshot's usage
- * standing; usage is live-only truth, and this is the last chance to take it.
+ * The terminal capture's race rule (ticket 03 item 1's build detail): the
+ * daemon merges usage cumulatively (`{...lastUsage, ...event.usage}`), so a
+ * re-fetch taken after the final merge carries the same fields with grown
+ * values, or more fields. The later snapshot wins whenever it is not
+ * emptier — same-field growth IS the race this exists to catch; only a
+ * re-fetch that came back emptier (a `usage_updated` replace anomaly, or a
+ * dead agent's null) leaves the terminal snapshot standing.
+ */
+export function pickUsage(terminal, refetched) {
+  const refetchedSize = Object.keys(refetched).length;
+  if (refetchedSize === 0 || refetchedSize < Object.keys(terminal).length) return terminal;
+  return refetched;
+}
+
+/**
+ * The terminal capture: `entry.usage` from the terminal snapshot, then ONE
+ * re-fetch against the usage-merge race — the terminal poll can land in the
+ * window between the status flipping and the last `turn_completed` folding
+ * into `lastUsage`. Usage is live-only truth the daemon persists nowhere,
+ * and this is the last chance to take it.
  */
 async function captureUsage(rpc, entry, snapshot) {
   entry.usage = usageOf(snapshot?.lastUsage);
   try {
     const payload = await rpc.request({ type: "fetch_agent_request", agentId: entry.agentId }, { responseType: "fetch_agent_response" });
     if (payload.agent !== null && payload.agent !== undefined) {
-      const refetched = usageOf(payload.agent.lastUsage);
-      if (Object.keys(refetched).length > Object.keys(entry.usage).length) entry.usage = refetched;
+      entry.usage = pickUsage(entry.usage, usageOf(payload.agent.lastUsage));
     }
   } catch {
     // The agent is gone or the socket blinked — the terminal snapshot stands.

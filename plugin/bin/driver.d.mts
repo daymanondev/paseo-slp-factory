@@ -66,6 +66,8 @@ export interface MeterUsage {
   totalCostUsd?: number;
 }
 export declare function usageOf(lastUsage: unknown): MeterUsage;
+/** The re-fetch race rule: the later snapshot wins unless it came back emptier. */
+export declare function pickUsage(terminal: MeterUsage, refetched: MeterUsage): MeterUsage;
 
 export interface ObserveEntry {
   task: string;

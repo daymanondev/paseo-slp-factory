@@ -424,13 +424,14 @@ function medianOf(values) {
 }
 
 /**
- * One task's Cost-read row, folded from its whole ledger slice: attempts,
- * lane (the latest meter's provider, else the latest spawn's — a task the
- * driver never ran has no lane), wall (first spawn → last verdict, both
- * ts-derived; "-" when either end never landed), gate time (the sum over
- * paired gate_started→gate_finished), and the cost cell's three honest
- * states — plus the fourth, no meter line at all, which renders no cost key:
- * a duration-only row (pre-0.0.8 tasks), never a fabricated zero.
+ * One task's Cost-read row, folded from the task's whole ledger slice
+ * (grouped once by the caller): attempts, lane (the latest meter's
+ * provider, else the latest spawn's — a task the driver never ran has no
+ * lane), wall (first spawn → last verdict, both ts-derived; "-" when either
+ * end never landed), gate time (the sum over paired
+ * gate_started→gate_finished), and the cost cell's three honest states —
+ * plus the fourth, no meter line at all, which renders no cost key: a
+ * duration-only row (pre-0.0.8 tasks), never a fabricated zero.
  */
 function costRow(task, events) {
   let attempts = 0;
@@ -442,7 +443,6 @@ function costRow(task, events) {
   let gatePairs = 0;
   const gateStartByAttempt = new Map();
   for (const evt of events) {
-    if (evt.task !== task) continue;
     if (Number.isInteger(evt.attempt) && evt.attempt > attempts) attempts = evt.attempt;
     if (evt.event === "spawn_dispatched") {
       if (firstSpawn === undefined) firstSpawn = Date.parse(evt.ts);
@@ -489,13 +489,20 @@ function costRow(task, events) {
  * constants on this side of the ledger.
  */
 function costLines(events) {
-  const rows = [];
-  const seen = new Set();
+  // Group once by task (a tasked event can only belong to one row), then
+  // fold each row from its own slice — no task ever rescans the whole file.
+  const taskOrder = [];
+  const byTask = new Map();
   for (const evt of events) {
-    if (evt.event !== "contract_set" || seen.has(evt.task)) continue;
-    seen.add(evt.task);
-    rows.push(costRow(evt.task, events));
+    if (typeof evt.task !== "string") continue; // retro lines and unbound git blocks belong to no row
+    if (!byTask.has(evt.task)) {
+      if (evt.event !== "contract_set") continue; // rows register on the Contract — a ghost's refusal invents nothing
+      byTask.set(evt.task, []);
+      taskOrder.push(evt.task);
+    }
+    byTask.get(evt.task).push(evt);
   }
+  const rows = taskOrder.map((task) => costRow(task, byTask.get(task)));
 
   const lines = rows.map((row) => {
     const cost =

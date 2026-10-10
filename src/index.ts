@@ -93,6 +93,7 @@ export type {
   SpawnDispatched,
   SpawnRefused,
   MeterWritten,
+  MeterUsage,
   RetroWritten,
 } from "./events.ts";
 export { EVENT_NAMES } from "./events.ts";

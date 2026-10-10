@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createFactory } from "../plugin/server/core/factory.ts";
 import { handleSpoolRequest, parseSpoolRequest } from "../plugin/server/spool.ts";
-import { usageOf } from "../plugin/bin/driver.mjs";
+import { pickUsage, usageOf } from "../plugin/bin/driver.mjs";
 import { Ledger, usageIsValid } from "../src/ledger.ts";
 import { disposeDir, gitCommitAll, makeTempDir } from "./helpers.ts";
 import type { Factory, MeterInput } from "../plugin/server/core/factory.ts";
@@ -197,4 +197,17 @@ test("usageOf reduces a snapshot's lastUsage to the four fields, present only wh
     { inputTokens: 5 },
     "the context-window gauges stay off the meter",
   );
+});
+
+test("pickUsage: the re-fetch wins the merge race unless it came back emptier", () => {
+  // The race the rule exists for: same fields, grown values — the later
+  // snapshot must win, or the meter undercounts the final turn.
+  const stale = { inputTokens: 84_000, outputTokens: 10_000 };
+  const merged = { inputTokens: 90_000, outputTokens: 12_000, totalCostUsd: 2.65 };
+  assert.deepEqual(pickUsage(stale, merged), merged, "same-field growth + a new field: the re-fetch wins");
+  assert.deepEqual(pickUsage({ inputTokens: 5 }, { inputTokens: 9 }), { inputTokens: 9 }, "same-field growth alone: the re-fetch still wins");
+
+  assert.deepEqual(pickUsage(merged, merged), merged, "identical snapshots: either stands, the later one does");
+  assert.deepEqual(pickUsage(stale, {}), stale, "an empty re-fetch changes nothing");
+  assert.deepEqual(pickUsage(merged, { inputTokens: 1 }), merged, "an emptier re-fetch (a replace anomaly) never shrinks the capture");
 });

@@ -312,6 +312,23 @@ export interface SpawnRefused {
 }
 
 /**
+ * The daemon's usage snapshot as the Meter records it — the single source
+ * for the shape (events.ts is the vocabulary's home): camelCase verbatim,
+ * each field present only when the lane provided it. Claude meters tokens
+ * plus a cumulative USD estimate (`totalCostUsd`); copilot counts tokens at
+ * most — ACP has no cost field — and its dollars are a subscription fact,
+ * never a measurement. An empty object is the honest "capture ran, the lane
+ * reported nothing" (the all-null `watch_written.usage` trap this verbatim
+ * rule avoids: absent means absent, nothing poses as zero).
+ */
+export interface MeterUsage {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  totalCostUsd?: number;
+}
+
+/**
  * The Meter's one line (v0.0.8, ticket 03) — the post-verdict capture of
  * what one task's run cost its lane. The driver reads the daemon's
  * `lastUsage` off its terminal poll and submits it through the spool; the
@@ -327,21 +344,8 @@ export interface MeterWritten {
   task: string;
   /** The `provider[/model]` string the driver ran the task under — recorded verbatim, like `spawn_dispatched`. */
   provider: string;
-  /**
-   * The daemon's own usage snapshot, verbatim camelCase: each field present
-   * only when the lane provided it. Claude meters tokens plus a cumulative
-   * USD estimate (`totalCostUsd`); copilot counts tokens at most — ACP has
-   * no cost field — and its dollars are a subscription fact, never a
-   * measurement. An empty object is the honest "capture ran, the lane
-   * reported nothing" (the all-null `watch_written.usage` trap this
-   * verbatim rule avoids: absent means absent, nothing poses as zero).
-   */
-  usage: {
-    inputTokens?: number;
-    cachedInputTokens?: number;
-    outputTokens?: number;
-    totalCostUsd?: number;
-  };
+  /** The daemon's own usage snapshot — see `MeterUsage`. */
+  usage: MeterUsage;
   /** The metered agent's id, when the driver knows it (the report precedent). */
   agent?: string;
 }

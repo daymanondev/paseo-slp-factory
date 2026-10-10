@@ -15,7 +15,12 @@ Changed before the first live run, while no real Ledger exists to migrate:
   Contract carries `attempt`; each Attempt gets its own Report (`report-<task>-<n>.md`),
   so Reports are never overwritten. A Claim while the previous Attempt's Gate is still
   running is rejected. Previously, concurrent Claims interleaved and a Report paired one
-  Claim's commit with another's Gate result.
+  Claim's commit with another's Gate result. *(Amended 2026-10-10, v0.0.8 ticket 04, to
+  record drift that began with v0.0.4: the task-scoped events carry no `attempt` — the
+  choke lines (v0.0.4) belong to the Task's whole life, the spawn lines (v0.0.5) precede
+  any attempt, and `meter_written` (v0.0.8) spans the whole run. `attempt` marks the
+  Attempt's loop, not a shape every event must wear; `retro_written` (v0.0.7) carries
+  no task at all — the factory-level event.)*
 - **`done_reported` is renamed `claim_reported`**: the Agent makes a Claim; a Task is
   Accepted only when the Owner accepts a green Attempt (ADR 0002). "Done" stays out of
   the Agent's vocabulary.

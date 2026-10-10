@@ -10,7 +10,7 @@ import { buildRetroDigest, retroDay, runRetroPass, writtenRetroForDay } from "./
 import type { RetroOutcome } from "./retro.ts";
 import { changesOutsideScope, checkCleanAt, headCommitSync, resolveClaimedCommit } from "./workspace.ts";
 import { FactoryError } from "./errors.ts";
-import type { AttemptAccepted, ContractSet, GateFinished, GitBlocked, LedgerEvent, MeterWritten, SpawnDispatched, SpawnRefused, Verdict } from "./events.ts";
+import type { AttemptAccepted, ContractSet, GateFinished, GitBlocked, LedgerEvent, MeterWritten, MeterUsage, SpawnDispatched, SpawnRefused, Verdict } from "./events.ts";
 import type { GateResult } from "./gate.ts";
 
 /** Task ids become report filenames, so they stay flat and filename-safe. */
@@ -123,13 +123,8 @@ export interface MeterInput {
   task: string;
   /** The `provider[/model]` string the driver ran the task under — recorded, never interpreted. */
   provider: string;
-  /** The daemon's usage snapshot: the four metered fields, each optional. */
-  usage: {
-    inputTokens?: number;
-    cachedInputTokens?: number;
-    outputTokens?: number;
-    totalCostUsd?: number;
-  };
+  /** The daemon's usage snapshot — see `MeterUsage` in events.ts. */
+  usage: MeterUsage;
   /** The metered agent's id, when the driver knows it (the report precedent). */
   agent?: string;
 }
@@ -603,7 +598,7 @@ export function createFactory(options: FactoryOptions): Factory {
         task,
         provider,
         usage,
-        ...(agent === undefined || agent.trim() === "" ? {} : { agent }),
+        ...(agent === undefined ? {} : { agent }),
       });
     },
 

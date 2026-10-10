@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { FactoryError } from "./core/errors.ts";
 import { usageIsValid } from "./core/ledger.ts";
 import type { Factory } from "./core/factory.ts";
-import type { Verdict } from "./core/events.ts";
+import type { MeterUsage, Verdict } from "./core/events.ts";
 
 export interface ContractRequest {
   id: string;
@@ -103,13 +103,8 @@ export interface MeterRequest {
   task: string;
   /** The `provider[/model]` string the driver's invocation ran under, verbatim. */
   provider: string;
-  /** The daemon's usage snapshot: the four metered fields, each optional. */
-  usage: {
-    inputTokens?: number;
-    cachedInputTokens?: number;
-    outputTokens?: number;
-    totalCostUsd?: number;
-  };
+  /** The daemon's usage snapshot — see `MeterUsage` in core/events.ts. */
+  usage: MeterUsage;
   /** The metered agent's id, when the driver knows it. */
   agent?: string;
 }
