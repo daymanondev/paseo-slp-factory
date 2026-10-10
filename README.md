@@ -76,7 +76,15 @@ reads that need no running plugin:
 npm run factory -- --home ~/.paseo-factory run T1 --provider claude/sonnet-5
 npm run factory -- --home ~/.paseo-factory status
 npm run factory -- --home ~/.paseo-factory cost
+npm run factory -- --home ~/.paseo-factory retro
 ```
+
+`retro` (v0.0.7) is the Owner's on-demand pass: it distills the whole ledger
+into a per-task digest and hands it to a fresh-context model whose one job is
+to *propose* — new Gate checks for repeated-error patterns, draft Contract
+pieces for knowledge holes, every proposal citing its ledger seq — writing
+one `retro_written` line and a dated proposals file. Nothing becomes law
+until the Owner ratifies it as ordinary repo work.
 
 The **Agent** gets one command, `factory-claim --task T1 --sha <commit>`, on its
 PATH automatically. It prints the Verdict, the gate note, and the report path;
@@ -99,6 +107,16 @@ flaw classes plus a clean control, pre-registered rules in the effort map):
 
 ```sh
 node scripts/flaw-battery.mjs --home ~/.paseo-factory   # all arms; --arm <name> re-runs one
+```
+
+The watch battery is the watch's own instrument (v0.0.6, five arms since the
+v0.0.8 re-arm plus a clean control): each arm plants one Watch question's
+evidence on a real task riding the Contract's `--description`, runs it through
+the same pipeline with `--watch`, and asserts the ledger shape — comparison
+against the pre-registered ground truth stays the operator's act:
+
+```sh
+node scripts/watch-battery.mjs --home ~/.paseo-factory   # all arms; --arm <name> re-runs one
 ```
 
 Since v0.0.6 the contract carries `--watch`: a record-only pass after every
