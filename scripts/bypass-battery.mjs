@@ -32,46 +32,20 @@
  * --keep leaves the scratch workspaces and remotes behind.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { awaitReply, randomId, spoolRootFor, submit } from "../plugin/bin/spool-client.mjs";
+import { TASK_ID_PATTERN, createScratchRegistry, die, parseBatteryArgs, run, stamp, step, taskLines } from "./battery-lib.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const batteryRoot = join(repoRoot, "fixtures", "bypass-battery");
 const ownerCli = join(repoRoot, "plugin", "bin", "factory.mjs");
-/** Same shape as src/factory.ts TASK_ID_PATTERN — task ids become filenames. */
-const TASK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const ASK_WAIT_MS = 30_000;
 const INGEST_WAIT_MS = 15_000;
-
-// ---- args -----------------------------------------------------------------------------
-
-const argv = process.argv.slice(2);
-const homeFlag = argv.includes("--home") ? argv[argv.indexOf("--home") + 1] : undefined;
-const armFlag = argv.includes("--arm") ? argv[argv.indexOf("--arm") + 1] : undefined;
-const keep = argv.includes("--keep");
-if (homeFlag === undefined || homeFlag === "") {
-  console.error("bypass-battery: --home <paseoHome> is required (point it at the trial daemon, never ~/.paseo)");
-  process.exit(2);
-}
-const home = homeFlag.startsWith("~") ? join(homedir(), homeFlag.slice(2)) : homeFlag;
-if (home === join(homedir(), ".paseo")) {
-  console.error("bypass-battery: refusing to run against the default ~/.paseo — that is prod; use the trial home (~/.paseo-factory)");
-  process.exit(2);
-}
-const stateDir = join(home, "plugin-state", "paseo-factory");
+const { armFlag, keep, home, stateDir } = parseBatteryArgs("bypass-battery");
 const binDir = join(stateDir, "bin");
-
-const step = (name) => console.log(`\n== ${name}`);
-const die = (message) => {
-  throw new Error(message);
-};
-
-// Every scratch path this run created — registered the moment it exists, so
-// the finally block cleans up even a half-run arm after a die().
-const scratch = new Set();
+const scratch = createScratchRegistry(stateDir);
 
 try {
   // ---- arms ----------------------------------------------------------------------------
@@ -130,28 +104,9 @@ try {
 
   // ---- shared helpers -------------------------------------------------------------------
 
-  const stamp = () => `${new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 6)}`;
   const ownerEnv = { ...process.env, PASEO_HOME: home };
   const gate = `${process.execPath} -e "process.exit(0)"`; // the contract's gate is ceremony here, not measurement
-
-  const run = (command, args, env, expectStatus, label) => {
-    const result = spawnSync(command, args, { encoding: "utf8", env, timeout: 10 * 60_000 });
-    const out = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-    console.log(`$ ${label}\n${out.split("\n").map((l) => `  ${l}`).join("\n")}`);
-    if (result.status !== expectStatus) {
-      die(`${label}: expected exit ${expectStatus}, got ${result.status === null ? "signal/killed" : result.status}`);
-    }
-    return out;
-  };
-
-  function ledgerLines() {
-    const path = join(stateDir, "ledger.jsonl");
-    if (!existsSync(path)) return [];
-    return readFileSync(path, "utf8").trimEnd().split("\n").filter((l) => l !== "").map((l) => JSON.parse(l));
-  }
-
-  const taskLines = (task) => ledgerLines().filter((e) => e.task === task);
-  const countEvent = (task, event) => taskLines(task).filter((e) => e.event === event).length;
+  const countEvent = (task, event) => taskLines(stateDir, task, { allowMissing: true }).filter((e) => e.event === event).length;
 
   /** Bounded wait until fn() stops throwing — how the battery sees the plugin's async ingestion. */
   async function until(fn, what, ms) {
@@ -176,10 +131,8 @@ try {
    */
   function stageArm(arm) {
     const task = `${arm.taskPrefix}-${stamp()}`;
-    const workspace = join(stateDir, `bypass-ws-${task}`);
-    const remote = arm.needsRemote === true ? join(stateDir, `bypass-remote-${task}.git`) : undefined;
-    scratch.add(workspace);
-    if (remote !== undefined) scratch.add(remote);
+    const workspace = scratch.add(join(stateDir, `bypass-ws-${task}`));
+    const remote = arm.needsRemote === true ? scratch.add(join(stateDir, `bypass-remote-${task}.git`)) : undefined;
 
     step(`${arm.name} → ${task}`);
     const git = (args, cwd = ws) =>
@@ -244,7 +197,7 @@ try {
       return { outcome: "failed", why: `denied citing ${reply.rule}, expected ${arm.expectRule} — fix the arm or the policy` };
     }
     const denied = countEvent(task, "permit_denied");
-    const others = taskLines(task).filter((e) => e.event === "permit_allowed" || e.event === "git_blocked").length;
+    const others = taskLines(stateDir, task, { allowMissing: true }).filter((e) => e.event === "permit_allowed" || e.event === "git_blocked").length;
     if (denied !== 1 || others !== 0) {
       return { outcome: "failed", why: `expected exactly one permit_denied and no other choke lines, got ${denied} denied / ${others} other` };
     }
@@ -277,7 +230,7 @@ try {
         throw new Error(`git_blocked lines for ${task}: ${countEvent(task, "git_blocked")} (want 1)`);
       }
     }, "waiting for the shim's ledger line", INGEST_WAIT_MS);
-    const others = taskLines(task).filter((e) => e.event === "permit_allowed" || e.event === "permit_denied").length;
+    const others = taskLines(stateDir, task, { allowMissing: true }).filter((e) => e.event === "permit_allowed" || e.event === "permit_denied").length;
     if (others !== 0) return { outcome: "failed", why: `${others} unexpected permit lines alongside the git_blocked` };
     return { outcome: "choked", why: `exit ${result.status} with the refusal line; remote unmoved; one git_blocked line` };
   }
@@ -364,9 +317,7 @@ try {
   process.exitCode = 1;
 } finally {
   if (!keep) {
-    for (const path of scratch) {
-      if (path.startsWith(stateDir)) rmSync(path, { recursive: true, force: true });
-    }
+    scratch.cleanup();
     console.log(`\n(cleaned scratch workspaces and remotes; ledger, reports and spool records kept as the audit trail)`);
   }
 }

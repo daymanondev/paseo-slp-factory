@@ -39,41 +39,23 @@
  * --keep leaves the scratch workspaces behind instead of deleting them.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import { cpSync, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TASK_ID_PATTERN, createScratchRegistry, die, flag, parseBatteryArgs, run, stamp, step, taskLines } from "./battery-lib.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const batteryRoot = join(repoRoot, "fixtures", "watch-battery");
 const ownerCli = join(repoRoot, "plugin", "bin", "factory.mjs");
-/** Same shape as src/factory.ts TASK_ID_PATTERN — task ids become filenames. */
-const TASK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 /** The display-only callout threshold — the report line's constant, echoed for the operator. */
 const CALLOUT_THRESHOLD = 0.5;
 
 // ---- args -----------------------------------------------------------------------------
 
-const argv = process.argv.slice(2);
-const flag = (name) => {
-  const at = argv.indexOf(name);
-  return at === -1 ? undefined : argv[at + 1];
-};
-const homeFlag = flag("--home");
-const armFlag = flag("--arm");
-const providerFlag = flag("--provider") ?? "copilot/gpt-5.4";
-const batchSize = Number(flag("--batch-size") ?? 3);
-const waitMins = Number(flag("--wait-mins") ?? 60);
-const keep = argv.includes("--keep");
-if (homeFlag === undefined || homeFlag === "") {
-  console.error("watch-battery: --home <paseoHome> is required (point it at the trial daemon, never ~/.paseo)");
-  process.exit(2);
-}
-const home = homeFlag.startsWith("~") ? join(homedir(), homeFlag.slice(2)) : homeFlag;
-if (home === join(homedir(), ".paseo")) {
-  console.error("watch-battery: refusing to run against the default ~/.paseo — that is prod; use the trial home (~/.paseo-factory)");
-  process.exit(2);
-}
+const { argv, armFlag, keep, home, stateDir } = parseBatteryArgs("watch-battery");
+const providerFlag = flag(argv, "--provider") ?? "copilot/gpt-5.4";
+const batchSize = Number(flag(argv, "--batch-size") ?? 3);
+const waitMins = Number(flag(argv, "--wait-mins") ?? 60);
 if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 9) {
   console.error("watch-battery: --batch-size must be an integer 1..9 (the driver's parallel width)");
   process.exit(2);
@@ -82,16 +64,7 @@ if (!Number.isFinite(waitMins) || waitMins <= 0) {
   console.error("watch-battery: --wait-mins must be a positive number");
   process.exit(2);
 }
-const stateDir = join(home, "plugin-state", "paseo-factory");
-
-const step = (name) => console.log(`\n== ${name}`);
-const die = (message) => {
-  throw new Error(message);
-};
-
-// Every scratch workspace this run created — registered the moment its path
-// exists, so the finally block cleans up even a half-run arm after a die().
-const workspaces = new Set();
+const workspaces = createScratchRegistry(stateDir);
 
 try {
   // ---- arms ----------------------------------------------------------------------------
@@ -154,27 +127,10 @@ try {
 
   // ---- shared helpers -------------------------------------------------------------------
 
-  const stamp = () => `${new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 6)}`;
   const ownerEnv = { ...process.env, PASEO_HOME: home };
   // The gate runs under the daemon's PATH (no nvm) — the contract names this
   // script's own node absolutely (the live-run lesson, ticket 09).
   const gate = `${process.execPath} --test --test-reporter=tap`;
-
-  const run = (command, args, env, expectStatus, label) => {
-    const result = spawnSync(command, args, { encoding: "utf8", env, timeout: 10 * 60_000 });
-    const out = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-    console.log(`$ ${label}\n${out.split("\n").map((l) => `  ${l}`).join("\n")}`);
-    if (result.status !== expectStatus) {
-      die(`${label}: expected exit ${expectStatus}, got ${result.status === null ? "signal/killed" : result.status}`);
-    }
-    return out;
-  };
-
-  function ledgerLines() {
-    return readFileSync(join(stateDir, "ledger.jsonl"), "utf8").trimEnd().split("\n").map((l) => JSON.parse(l));
-  }
-
-  const taskLines = (task) => ledgerLines().filter((e) => e.task === task);
 
   // ---- stage + contract -----------------------------------------------------------------
 
@@ -185,8 +141,7 @@ try {
    */
   function stageArm(arm) {
     const task = `${arm.taskPrefix}-${stamp()}`;
-    const workspace = join(stateDir, `watch-ws-${task}`);
-    workspaces.add(workspace);
+    const workspace = workspaces.add(join(stateDir, `watch-ws-${task}`));
 
     step(`${arm.name} → ${task} (contract)`);
     cpSync(join(arm.dir, "workspace"), workspace, { recursive: true });
@@ -244,7 +199,7 @@ try {
 
   function readArm(staged) {
     const { arm, task } = staged;
-    const events = taskLines(task);
+    const events = taskLines(stateDir, task);
     if (events.length === 0) return { outcome: "failed", why: `no ledger lines for ${task}` };
 
     const attempt1 = events.filter((e) => e.attempt === undefined || e.attempt === 1);
@@ -367,9 +322,7 @@ try {
   process.exitCode = 1;
 } finally {
   if (!keep) {
-    for (const ws of workspaces) {
-      if (ws.startsWith(stateDir)) rmSync(ws, { recursive: true, force: true });
-    }
+    workspaces.cleanup();
     console.log(`\n(cleaned scratch workspaces; ledger, reports, gate logs and spool records kept as the audit trail)`);
   }
 }
