@@ -162,7 +162,7 @@ export function fakeCopilotRunner(script: (call: FakeCopilotCall, index: number)
   return { runner, calls };
 }
 
-/** The CLI's happy answer: the four `name: number` lines, the strict output contract satisfied. */
+/** The CLI's happy answer: the five `name: number` lines, the strict output contract satisfied. */
 export function copilotAnswerLines(answers: Record<string, number>): string {
   return Object.entries(answers)
     .map(([name, probability]) => `${name}: ${probability}`)

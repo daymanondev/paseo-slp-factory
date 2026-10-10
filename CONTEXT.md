@@ -65,11 +65,11 @@ A second judgment of a green Attempt by a different model that took no part in w
 _Avoid_: mắt soi (outside research notes), code review, self-review
 
 **Watch**:
-The record-only post-verdict pass that asks the four Watch questions about one Attempt — a Copilot chat model (pinned in code, prompted headless through the daemon's `copilot` CLI) reading the run timeline, the Contract, the diff and the gate output in one strict-answer pass — and appends exactly one ledger line (`watch_written`). A passenger, never a judge: no notification, no escalation, and Verdicts and driver exits are unchanged by its answers. Off unless the Contract marks it on. Added in v0.0.6; the question table shrank to four in v0.0.7.
+The record-only post-verdict pass that asks the Watch questions about one Attempt — a Copilot chat model (pinned in code, prompted headless through the daemon's `copilot` CLI) reading the run timeline, the Contract, the diff and the gate output in one strict-answer pass — and appends exactly one ledger line (`watch_written`). A passenger, never a judge: no notification, no escalation, and Verdicts and driver exits are unchanged by its answers. Off unless the Contract marks it on. Added in v0.0.6; the question table shrank to four in v0.0.7 and returned to five in v0.0.8.
 _Avoid_: watcher, monitor, alarm, "Jev" (historical: the v0.0.6 design first used a decision model, dropped for the Copilot subscription before the first run)
 
 **Watch question**:
-One of the four fixed yes/no questions the Watch asks (test-weakened, stuck-loop, scope-creep, secret-leak) — each with fixed wording and true/false criteria, answered as a probability between 0 and 1 in a strict `name: probability` answer format, never prose. The v0.0.7 shrink (rider #1) kept these four of the original eight: fake-done, unverified-claims and self-accept were dropped, destructive-writes is deferred to the 0.0.8 watch-battery occasion.
+One of the five fixed yes/no questions the Watch asks (destructive-writes, test-weakened, stuck-loop, scope-creep, secret-leak) — each with fixed wording and true/false criteria, answered as a probability between 0 and 1 in a strict `name: probability` answer format, never prose. The v0.0.7 shrink kept four of the original eight (fake-done, unverified-claims and self-accept dropped); destructive-writes returned in v0.0.8, its battery arm redesigned so the blocked step rides a task that still reaches a Claim — the v0.0.6 arm stalled on the block and left the Watch nothing to read.
 _Avoid_: check, heuristic, alert rule
 
 **Retro**:
@@ -127,6 +127,10 @@ _Avoid_: log, history, sổ (outside research notes)
 **Report**:
 The human-readable account of one Attempt, generated from the Ledger, with every line traceable to a Ledger event.
 _Avoid_: summary, biên bản (outside research notes)
+
+**Meter**:
+The post-verdict capture of what one task's run cost its lane: the daemon's own usage snapshot — dollars where the lane meters them, tokens where it only counts, the absence recorded where it does neither — read at the run's terminal moment and appended as exactly one ledger line (`meter_written`). A recorder, never a judge: no budgets, no alerts, verdicts unchanged. Added in v0.0.8.
+_Avoid_: cost tracker, billing, accounting
 
 ### Running
 

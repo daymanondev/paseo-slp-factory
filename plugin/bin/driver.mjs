@@ -7,7 +7,10 @@
  * - **One writer (ADR 0004):** the driver never writes the ledger. It submits
  *   a `spawn` request per task through the spool and reads the plugin's
  *   reply; verdicts are read back from the ledger the plugin maintains (the
- *   same read-only read `factory status` does).
+ *   same read-only read `factory status` does). Since v0.0.8 the meter rides
+ *   the same law: the driver captures the daemon's usage snapshot at each
+ *   task's terminal moment and submits one `meter` request — the plugin
+ *   validates and appends `meter_written`.
  * - **Zero runtime deps:** node's built-in `WebSocket` + `node:fs` +
  *   `node:child_process`, nothing else. The daemon WS protocol is
  *   source-verified against `@getpaseo/client` 0.10.3 (v0.0.5 ticket 01's
@@ -461,7 +464,12 @@ export function agentFate(agent) {
  * hiccup or a slow poll is transient and simply tries again next tick —
  * "restart-tolerant, keep polling" must not misreport a live agent. No
  * overall timeout: the run ends when every agent is terminal or the operator
- * interrupts. `onTerminal` fires once per task, the moment it lands.
+ * interrupts. `onTerminal` fires once per task, the moment it lands — it may
+ * be async (the driver's callback submits the meter there), and the loop
+ * awaits it: a meter submission must finish before the run's exit judgement,
+ * never race it. At each terminal moment the daemon's usage snapshot is
+ * captured onto the entry (`entry.usage`, the v0.0.8 meter's input) — the
+ * one re-fetch riding along below.
  */
 export async function observeTasks(rpc, entries, { pollMs = POLL_MS, log = () => {}, onTerminal = () => {} } = {}) {
   for (const entry of entries) {
@@ -501,8 +509,10 @@ export async function observeTasks(rpc, entries, { pollMs = POLL_MS, log = () =>
       } catch (err) {
         if (err.rpc === true) {
           // The daemon answered: the agent is gone. That is a death, reported.
+          // No snapshot ever arrived, so the meter's capture is the honest
+          // empty one — the lane reported nothing to a dead agent's poll.
           entry.terminal = { fate: "died", reason: err.message };
-          onTerminal(entry);
+          await onTerminal(entry);
           continue;
         }
         // Connection trouble or a slow poll — transient, never a verdict.
@@ -518,7 +528,8 @@ export async function observeTasks(rpc, entries, { pollMs = POLL_MS, log = () =>
       }
       if (fate.terminal) {
         entry.terminal = fate;
-        onTerminal(entry);
+        await captureUsage(rpc, entry, snapshot);
+        await onTerminal(entry);
         continue;
       }
       await stallWatch(rpc, entry, snapshot, log).catch(() => {}); // a failed timeline read must not sink the poll
@@ -571,6 +582,94 @@ async function stallWatch(rpc, entry, snapshot, log) {
   }
 }
 
+// ---- meter: the terminal usage capture (v0.0.8, ticket 03 item 1) ----------------------
+
+/** The meter's four usage fields — the daemon's own camelCase names, verbatim. */
+const USAGE_FIELDS = ["inputTokens", "cachedInputTokens", "outputTokens", "totalCostUsd"];
+
+/**
+ * The daemon's `lastUsage` reduced to the meter's fields: each present only
+ * when the snapshot carried a finite number for it. An empty object is the
+ * honest "capture ran, the lane reported nothing" — copilot dollars never
+ * exist (ACP has no cost field), and a claude lane may report tokens without
+ * a USD estimate. Nothing poses as zero.
+ */
+export function usageOf(lastUsage) {
+  if (typeof lastUsage !== "object" || lastUsage === null) return {};
+  const usage = {};
+  for (const field of USAGE_FIELDS) {
+    const value = lastUsage[field];
+    if (typeof value === "number" && Number.isFinite(value)) usage[field] = value;
+  }
+  return usage;
+}
+
+/**
+ * The terminal capture's race rule (ticket 03 item 1's build detail): the
+ * daemon merges usage cumulatively (`{...lastUsage, ...event.usage}`), so a
+ * re-fetch taken after the final merge carries the same fields with grown
+ * values, or more fields. The later snapshot wins whenever it is not
+ * emptier — same-field growth IS the race this exists to catch; only a
+ * re-fetch that came back emptier (a `usage_updated` replace anomaly, or a
+ * dead agent's null) leaves the terminal snapshot standing.
+ */
+export function pickUsage(terminal, refetched) {
+  const refetchedSize = Object.keys(refetched).length;
+  if (refetchedSize === 0 || refetchedSize < Object.keys(terminal).length) return terminal;
+  return refetched;
+}
+
+/**
+ * The terminal capture: `entry.usage` from the terminal snapshot, then ONE
+ * re-fetch against the usage-merge race — the terminal poll can land in the
+ * window between the status flipping and the last `turn_completed` folding
+ * into `lastUsage`. Usage is live-only truth the daemon persists nowhere,
+ * and this is the last chance to take it.
+ */
+async function captureUsage(rpc, entry, snapshot) {
+  entry.usage = usageOf(snapshot?.lastUsage);
+  try {
+    const payload = await rpc.request({ type: "fetch_agent_request", agentId: entry.agentId }, { responseType: "fetch_agent_response" });
+    if (payload.agent !== null && payload.agent !== undefined) {
+      entry.usage = pickUsage(entry.usage, usageOf(payload.agent.lastUsage));
+    }
+  } catch {
+    // The agent is gone or the socket blinked — the terminal snapshot stands.
+  }
+}
+
+/** How long the meter's spool reply may take — the plugin answers it without running anything. */
+const METER_WAIT_MS = 15_000;
+
+/**
+ * One task's meter submission: the captured usage rides a `meter` request
+ * through the spool (ADR 0004 — the driver never writes the ledger; the
+ * plugin validates and appends). Report-only in both failure shapes: a
+ * refusal names its code, a silent plugin names the stuck request id, and
+ * neither turns a green run red — the meter records, it never judges.
+ */
+async function submitMeter(spoolRoot, entry, provider, log) {
+  const request = {
+    id: randomId(),
+    kind: "meter",
+    task: entry.task,
+    provider,
+    usage: entry.usage ?? {},
+    agent: entry.agentId,
+  };
+  submit(spoolRoot, request);
+  const reply = await awaitReply(spoolRoot, request.id, METER_WAIT_MS);
+  if (reply === null) {
+    log(`factory: ${entry.task} meter — no reply within ${METER_WAIT_MS / 1000}s (request ${request.id} stays in the spool; no meter line)`);
+    return;
+  }
+  if (!reply.ok) {
+    log(`factory: ${entry.task} meter refused — ${reply.code}: ${reply.message} (no meter line)`);
+    return;
+  }
+  log(`factory: ${entry.task} meter written — ${reply.summary}`);
+}
+
 // ---- the command -----------------------------------------------------------------------------------------------------
 
 /**
@@ -578,8 +677,13 @@ async function stallWatch(rpc, entry, snapshot, log) {
  * refusals, no spool request, no ledger line), the spool's `spawn` request
  * (the plugin appends `spawn_dispatched`/`spawn_refused`), then the agent
  * created over the daemon RPC, staggered. Then one observe loop to everyone's
- * terminal state, verdicts read from the ledger. Exit 0 iff every task ended
- * green and nothing was refused or failed along the way; else exit 2.
+ * terminal state, verdicts read from the ledger. At each task's terminal
+ * moment the driver also meters it (v0.0.8): the daemon's usage snapshot,
+ * captured off the terminal poll and submitted through the spool as one
+ * `meter` request — the plugin validates and appends `meter_written`; a
+ * refusal or a silent plugin is reported and the run moves on, because the
+ * meter is a recorder and never re-judges a green run. Exit 0 iff every task
+ * ended green and nothing was refused or failed along the way; else exit 2.
  */
 export async function runDriver({ home, stateDir, spoolRoot, tasks, provider, waitSecs = 60, pollMs = POLL_MS, staggerMs = STAGGER_MS, log = (m) => console.log(m) }) {
   // These change spawn routing when the driver itself runs under an agent —
@@ -665,11 +769,13 @@ export async function runDriver({ home, stateDir, spoolRoot, tasks, provider, wa
 
   // Each task's verdict is printed the moment its agent turns terminal
   // (ticket 03 §5: "at each task's verdict"), from a fresh ledger read —
-  // the plugin wrote the verdict while the agent worked.
+  // the plugin wrote the verdict while the agent worked. The meter follows
+  // the print (v0.0.8): the usage captured at the terminal moment rides one
+  // spool request, and the plugin appends the `meter_written` line.
   await observeTasks(rpc, entries, {
     pollMs,
     log: say,
-    onTerminal: (entry) => {
+    onTerminal: async (entry) => {
       if (entry.terminal.fate !== "finished") {
         say(`factory: ${entry.task} agent ${entry.terminal.fate} — ${entry.terminal.reason ?? "no reason given"}`);
       }
@@ -683,6 +789,7 @@ export async function runDriver({ home, stateDir, spoolRoot, tasks, provider, wa
           `choke=${outcome.allowed}/${outcome.denied}/${outcome.blocked}`,
         ].join(" "),
       );
+      await submitMeter(spoolRoot, entry, provider, say);
     },
   });
   rpc.close();

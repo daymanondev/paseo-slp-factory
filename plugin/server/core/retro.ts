@@ -85,6 +85,14 @@ function renderTaskEvent(evt: LedgerEvent, stateDir: string, attached: { logs: n
       return [`[${evt.seq}] spawn_dispatched provider=${evt.provider} arity=${evt.arity}`];
     case "spawn_refused":
       return [`[${evt.seq}] spawn_refused rule=${evt.rule} — ${evt.reason}`];
+    case "meter_written": {
+      // The whole-run cost fact, verbatim fields (v0.0.8) — absent fields
+      // stay absent; the dollars are a lane estimate, never an invoice.
+      const usage = Object.entries(evt.usage)
+        .map(([field, value]) => `${field}=${value}`)
+        .join(" ");
+      return [`[${evt.seq}] meter provider=${evt.provider} usage={${usage}}${evt.agent === undefined ? "" : ` agent=${evt.agent}`}`];
+    }
     case "claim_reported":
       return [
         `[${evt.seq}] claim attempt=${evt.attempt} sha=${evt.sha}${evt.agent === undefined ? "" : ` agent=${evt.agent}`}`,

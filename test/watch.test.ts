@@ -20,8 +20,9 @@ import { copilotAnswerLines, disposeDir, factoryErrorCode, fakeCopilotRunner, gi
  * rule, the budget), and the description-slot rider's contract field.
  */
 
-/** All four names (the v0.0.7 rider #1 shrink), one happy answer set — sorted desc: scope-creep first. */
-const ALL_FOUR: Record<string, number> = {
+/** All five names (the v0.0.8 rider #1 re-arm), one happy answer set — sorted desc: scope-creep first. */
+const ALL_FIVE: Record<string, number> = {
+  "destructive-writes": 0.03,
   "test-weakened": 0.05,
   "stuck-loop": 0.2,
   "scope-creep": 0.61,
@@ -70,7 +71,7 @@ function watchEvent(factory: Factory, task: string): WatchWritten {
 
 /** The fake CLI's happy stand-in — the factory's options for a hermetic watch. */
 function happyCopilot() {
-  return fakeCopilotRunner(() => ({ code: 0, stdout: copilotAnswerLines(ALL_FOUR) }));
+  return fakeCopilotRunner(() => ({ code: 0, stdout: copilotAnswerLines(ALL_FIVE) }));
 }
 
 /** Extracts the STATE JSON back out of a captured prompt — it is the prompt's tail. */
@@ -142,7 +143,7 @@ test("a green marked claim runs the watch: ledger order, event fields, CLI argv,
   const watch = watchEvent(factory, "W4");
   assert.equal(watch.model, "copilot/gpt-5.4");
   assert.equal(watch.outcome, "written");
-  assert.deepEqual(watch.answers, ALL_FOUR);
+  assert.deepEqual(watch.answers, ALL_FIVE);
   assert.equal(watch.usage, undefined, "the CLI reports no usage — nothing is invented");
   assert.ok(typeof watch.durationMs === "number" && watch.durationMs >= 0);
   assert.equal(watch.error, undefined);
@@ -153,14 +154,14 @@ test("a green marked claim runs the watch: ledger order, event fields, CLI argv,
   assert.deepEqual(call.args, ["-s", "--model", "gpt-5.4", "--reasoning-effort", "medium"], "the argv never wavers — no auto, no config");
   const prompt = call.stdin;
   assert.ok(prompt.includes("Do not run commands"), "the prompt forbids tool use");
-  assert.match(prompt, /EXACTLY four lines/, "the strict output contract is stated");
+  assert.match(prompt, /EXACTLY five lines/, "the strict output contract is stated");
   for (const question of WATCH_QUESTIONS) {
     assert.ok(prompt.includes(question.name), `${question.name}: named`);
     assert.ok(prompt.includes(question.instructions), `${question.name}: literal instructions`);
     assert.ok(prompt.includes(question.criteria.true), `${question.name}: true criteria`);
     assert.ok(prompt.includes(question.criteria.false), `${question.name}: false criteria`);
   }
-  for (const dropped of ["destructive-writes", "fake-done", "unverified-claims", "self-accept"]) {
+  for (const dropped of ["fake-done", "unverified-claims", "self-accept"]) {
     assert.ok(!prompt.includes(dropped), `${dropped}: gone with the rider #1 shrink`);
   }
   assert.ok(!prompt.includes('"prior"') && !/\bprior\b/i.test(prompt), "priors are operator metadata — never sent");
@@ -187,7 +188,7 @@ test("a green marked claim runs the watch: ledger order, event fields, CLI argv,
   // language, answers sorted desc, with the display-only ≥0.5 callout.
   const report = readFileSync(outcome.reportPath, "utf8");
   const verdictAt = report.indexOf("- Verdict: GREEN");
-  const watchAt = report.indexOf("- Watch (gpt-5.4) — 4 answers: scope-creep 0.61, stuck-loop 0.20");
+  const watchAt = report.indexOf("- Watch (gpt-5.4) — 5 answers: scope-creep 0.61, stuck-loop 0.20");
   const closingAt = report.indexOf("- Evidence, not acceptance");
   assert.ok(verdictAt > -1 && watchAt > verdictAt && closingAt > watchAt, "watch line sits between verdict and closing language");
   assert.ok(report.includes("≥0.5: scope-creep"), "the callout names the flagged questions, display-only");
@@ -352,7 +353,7 @@ test("malformed answers: missing names and non-numeric values are nulls, outcome
   disposeDir(t, dir);
   const { workspace, artifact } = makeWorkspaceAtBase(dir);
   const stateDir = join(dir, "factory");
-  // One of the four answered well, one non-numeric, one out of range, one absent.
+  // One of the five answered well, one non-numeric, one out of range, two absent.
   const fake = fakeCopilotRunner(() => ({
     code: 0,
     stdout: "test-weakened: 0.9\nsecret-leak: high\nstuck-loop: 3\nsome-random-line: hello",
@@ -370,6 +371,7 @@ test("malformed answers: missing names and non-numeric values are nulls, outcome
   assert.equal(watch.answers!["stuck-loop"], null, "an out-of-range probability is a null, never clamped");
   assert.match(watch.error!, /missing question answers/);
   assert.ok(watch.error!.includes("scope-creep"), "the absent question is named");
+  assert.ok(watch.error!.includes("destructive-writes"), "the re-armed question is named too when absent");
   assert.ok(watch.error!.includes("secret-leak"), "the non-numeric question is named");
   assert.ok(watch.error!.includes("stuck-loop"), "the out-of-range question is named");
   const report = readFileSync(outcome.reportPath, "utf8");
@@ -384,7 +386,7 @@ test("a transient CLI failure retries exactly once and succeeds", async (t) => {
   const fake = fakeCopilotRunner((_call, index) =>
     index === 0
       ? { code: 1, stdout: "", stderr: "copilot: transient boot failure" }
-      : { code: 0, stdout: copilotAnswerLines(ALL_FOUR) },
+      : { code: 0, stdout: copilotAnswerLines(ALL_FIVE) },
   );
   const factory = createFactory({ stateDir, fetchTimeline: timelineFetcher(TIMELINE).fetch, watchCopilotProbe: () => true, watchCopilotRunner: fake.runner });
 
@@ -589,8 +591,9 @@ test("buildWatchPrompt: the strict output contract, question order, and the stat
   const state = { note: "n", contract: { task: "T" }, diff: "d", gate_output: "g", code_answers: {}, timeline: "t" };
   const prompt = buildWatchPrompt(state);
   const expectedOrder = WATCH_QUESTIONS.map((question) => `${question.name}: <number 0-1>`).join("\n");
-  assert.ok(prompt.includes(expectedOrder), "the answer template names all four in order");
-  assert.equal(WATCH_QUESTIONS.length, 4, "the rider #1 shrink: four surviving questions");
+  assert.ok(prompt.includes(expectedOrder), "the answer template names all five in order");
+  assert.equal(WATCH_QUESTIONS.length, 5, "the v0.0.8 rider #1 re-arm: destructive-writes is back");
+  assert.equal(WATCH_QUESTIONS[0]!.name, "destructive-writes", "the v0.0.6 table order restored: destructive-writes first");
   assert.ok(prompt.endsWith(JSON.stringify(state, null, 2)), "the state JSON is the prompt's tail — parseable back out");
   assert.match(prompt, /0 and 1/, "the probability range is stated");
 });
@@ -600,7 +603,7 @@ test("runWatchPass direct: pinned argv per invocation, the budget shared across 
   disposeDir(t, dir);
   const { workspace, artifact, base } = makeWorkspaceAtBase(dir);
   const fake = fakeCopilotRunner((_call, index) =>
-    index === 0 ? { code: 1, stdout: "", stderr: "boom" } : { code: 0, stdout: copilotAnswerLines(ALL_FOUR) },
+    index === 0 ? { code: 1, stdout: "", stderr: "boom" } : { code: 0, stdout: copilotAnswerLines(ALL_FIVE) },
   );
   const contract: ContractSet = {
     seq: 1,

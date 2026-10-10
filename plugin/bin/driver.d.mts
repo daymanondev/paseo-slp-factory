@@ -58,6 +58,17 @@ export interface AgentFate {
 }
 export declare function agentFate(agent: Record<string, unknown>): AgentFate;
 
+/** The daemon's usage snapshot reduced to the four meter fields, present only when finite (v0.0.8). */
+export interface MeterUsage {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  totalCostUsd?: number;
+}
+export declare function usageOf(lastUsage: unknown): MeterUsage;
+/** The re-fetch race rule: the later snapshot wins unless it came back emptier. */
+export declare function pickUsage(terminal: MeterUsage, refetched: MeterUsage): MeterUsage;
+
 export interface ObserveEntry {
   task: string;
   agentId: string;
@@ -65,7 +76,7 @@ export interface ObserveEntry {
 export declare function observeTasks(
   rpc: DaemonRpc,
   entries: ObserveEntry[],
-  options?: { pollMs?: number; log?: (message: string) => void },
+  options?: { pollMs?: number; log?: (message: string) => void; onTerminal?: (entry: ObserveEntry) => void | Promise<void> },
 ): Promise<void>;
 
 export interface RunDriverInput {
