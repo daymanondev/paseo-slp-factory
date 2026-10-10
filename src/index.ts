@@ -6,10 +6,10 @@
  * forever (`research/03-hands-on/04-andrew-room.md` §12).
  */
 export { createFactory } from "./factory.ts";
-export type { Factory, FactoryOptions, ContractInput, ClaimInput, ClaimOutcome, AcceptInput, SpawnInput, SpawnDecision } from "./factory.ts";
+export type { Factory, FactoryOptions, ContractInput, ClaimInput, ClaimOutcome, AcceptInput, SpawnInput, SpawnDecision, MeterInput } from "./factory.ts";
 export { resolveClaimedCommit, checkCleanAt, diffBetween } from "./workspace.ts";
 export type { CommitResolution, TreeCheck } from "./workspace.ts";
-export { Ledger } from "./ledger.ts";
+export { Ledger, usageIsValid } from "./ledger.ts";
 export { runGate } from "./gate.ts";
 export type { GateInput, GateResult } from "./gate.ts";
 export { eyeConfigPath, loadEyeConfig, runFreshEyesPass, tailWithMarker, parseEyeAnswer } from "./fresh-eyes.ts";
@@ -92,6 +92,7 @@ export type {
   GitBlocked,
   SpawnDispatched,
   SpawnRefused,
+  MeterWritten,
   RetroWritten,
 } from "./events.ts";
 export { EVENT_NAMES } from "./events.ts";

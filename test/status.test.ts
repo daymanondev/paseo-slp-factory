@@ -416,3 +416,17 @@ test("status is lenient about spawn-event field depth the way it is for choke ev
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "T1 attempts=0 verdict=- sha=- accepted=no eye=- choke=0/0/0\n");
 });
+
+test("status reads a ledger with meter lines through — the Cost read's event, not the glance's", async (t) => {
+  const dir = makeTempDir();
+  disposeDir(t, dir);
+  const stateDir = join(dir, "plugin-state", "paseo-factory");
+  writeLedger(stateDir, [
+    contractEvent(1, "M1"),
+    { seq: 2, ts, event: "spawn_dispatched", task: "M1", provider: "claude/claude-sonnet-5", arity: 1 },
+    { seq: 3, ts, event: "meter_written", task: "M1", provider: "claude/claude-sonnet-5", usage: { totalCostUsd: 2.65 }, agent: "ag-1" },
+  ]);
+  const result = await run(ownerCli, ["status"], { PASEO_HOME: dir });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "M1 attempts=0 verdict=- sha=- accepted=no eye=- choke=0/0/0\n", "the meter line counts toward no status field — `factory cost` is its reader");
+});

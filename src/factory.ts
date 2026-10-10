@@ -1,6 +1,6 @@
 import { statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { Ledger } from "./ledger.ts";
+import { Ledger, usageIsValid } from "./ledger.ts";
 import { runGate } from "./gate.ts";
 import { renderReport } from "./report.ts";
 import { loadEyeConfig, runFreshEyesPass } from "./fresh-eyes.ts";
@@ -10,7 +10,7 @@ import { buildRetroDigest, retroDay, runRetroPass, writtenRetroForDay } from "./
 import type { RetroOutcome } from "./retro.ts";
 import { changesOutsideScope, checkCleanAt, headCommitSync, resolveClaimedCommit } from "./workspace.ts";
 import { FactoryError } from "./errors.ts";
-import type { AttemptAccepted, ContractSet, GateFinished, GitBlocked, LedgerEvent, SpawnDispatched, SpawnRefused, Verdict } from "./events.ts";
+import type { AttemptAccepted, ContractSet, GateFinished, GitBlocked, LedgerEvent, MeterWritten, SpawnDispatched, SpawnRefused, Verdict } from "./events.ts";
 import type { GateResult } from "./gate.ts";
 
 /** Task ids become report filenames, so they stay flat and filename-safe. */
@@ -113,6 +113,28 @@ export interface SpawnInput {
 }
 
 /**
+ * One meter submission (v0.0.8, ticket 03 item 1): the daemon usage snapshot
+ * the driver captured at the task's terminal moment. `usage` keeps the
+ * daemon's camelCase verbatim — each field present only when the lane
+ * provided it; an empty object is the honest "capture ran, nothing
+ * reported", never a zero posing as a measurement.
+ */
+export interface MeterInput {
+  task: string;
+  /** The `provider[/model]` string the driver ran the task under — recorded, never interpreted. */
+  provider: string;
+  /** The daemon's usage snapshot: the four metered fields, each optional. */
+  usage: {
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    outputTokens?: number;
+    totalCostUsd?: number;
+  };
+  /** The metered agent's id, when the driver knows it (the report precedent). */
+  agent?: string;
+}
+
+/**
  * One spawn request, judged: dispatched means the driver may create the
  * agent; refused names the rule that fired. Either way exactly one ledger
  * line exists after this call — a refused spawn is a recorded fact, not a
@@ -153,6 +175,19 @@ export interface Factory {
    * (and the spool reply), not an exception.
    */
   requestSpawn(input: SpawnInput): SpawnDecision;
+  /**
+   * Records one Meter line (v0.0.8): the post-verdict capture of what the
+   * task's run cost its lane, submitted by the driver through the spool
+   * (ADR 0004's one-writer law, third amendment). Validates the shape and
+   * that the task is known, then appends exactly one task-scoped
+   * `meter_written` line — usage verbatim in the daemon's camelCase, fields
+   * present only when the lane provided them. A refused meter (unknown
+   * task, malformed usage) throws and writes NO line — nothing changed,
+   * nothing recorded. One line per task per driver run by construction; a
+   * re-run task lands a second line and the Cost read takes the latest.
+   * A recorder, never a judge: no budgets, no alerts, verdicts unchanged.
+   */
+  meter(input: MeterInput): MeterWritten;
   /**
    * The live Contract whose workspace contains `cwd`, if any — the choke's
    * mechanical "contracted agent" test (v0.0.4 map decision 5: asks from
@@ -541,6 +576,35 @@ export function createFactory(options: FactoryOptions): Factory {
         );
       }
       return { outcome: "dispatched", event: ledger.append({ ...base, event: "spawn_dispatched" }) };
+    },
+
+    meter({ task, provider, usage, agent }) {
+      assertTaskId(task);
+      if (provider.trim() === "") {
+        throw new FactoryError("invalid-meter", "meter provider must be a non-empty string — the provider[/model] the driver ran the task under");
+      }
+      if (!usageIsValid(usage)) {
+        throw new FactoryError(
+          "invalid-meter",
+          "meter usage must be an object of the daemon's four fields (inputTokens, cachedInputTokens, outputTokens, totalCostUsd), each a finite number when present — an empty object is the honest empty capture",
+        );
+      }
+      if (agent !== undefined && (typeof agent !== "string" || agent.trim() === "")) {
+        throw new FactoryError("invalid-meter", "meter agent must be a non-empty string — omit it when the driver knows no agent id");
+      }
+      // Task known = a Contract exists (ticket 03 item 1's validation). The
+      // meter deliberately does not care about attempts or acceptance: it
+      // lands at the task's terminal moment, wherever the judging stands.
+      if (this.contractFor(task) === undefined) {
+        throw new FactoryError("unknown-task", `no contract set for task ${task} — the meter records a run, and no run was ever contracted`);
+      }
+      return ledger.append({
+        event: "meter_written",
+        task,
+        provider,
+        usage,
+        ...(agent === undefined || agent.trim() === "" ? {} : { agent }),
+      });
     },
 
     liveContractFor(cwd) {

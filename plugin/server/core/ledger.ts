@@ -123,7 +123,9 @@ export class Ledger {
  * carry none either — they precede any attempt — and need their task,
  * provider, arity, and (for a refusal) rule and reason. The v0.0.7
  * `retro_written` carries neither task nor attempt — the factory-level
- * event — and needs its model, outcome and duration.
+ * event — and needs its model, outcome and duration. The v0.0.8
+ * `meter_written` carries no attempt (usage spans the run) and needs its
+ * task, provider, and a usage object of the four daemon fields.
  */
 function shapeIsValid(evt: LedgerEvent): boolean {
   const asRecord = evt as unknown as Record<string, unknown>;
@@ -161,8 +163,31 @@ function shapeIsValid(evt: LedgerEvent): boolean {
       (evt.event === "spawn_dispatched" || (typeof asRecord.rule === "string" && typeof asRecord.reason === "string"))
     );
   }
+  if (evt.event === "meter_written") {
+    return (
+      taskIsString &&
+      typeof asRecord.provider === "string" &&
+      (asRecord.agent === undefined || typeof asRecord.agent === "string") &&
+      usageIsValid(asRecord.usage)
+    );
+  }
   const attempt = asRecord.attempt;
   return taskIsString && typeof attempt === "number" && Number.isInteger(attempt) && attempt >= 1;
+}
+
+/**
+ * The Meter's usage slot (v0.0.8): an object (possibly empty — the honest
+ * "the lane reported nothing") whose keys are exactly the daemon's four
+ * metered fields, each a finite number when present. Anything else is a
+ * corrupted line, never a guessed-at reading.
+ */
+export function usageIsValid(usage: unknown): boolean {
+  if (typeof usage !== "object" || usage === null || Array.isArray(usage)) return false;
+  for (const [key, value] of Object.entries(usage)) {
+    if (!["inputTokens", "cachedInputTokens", "outputTokens", "totalCostUsd"].includes(key)) return false;
+    if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  }
+  return true;
 }
 
 /**

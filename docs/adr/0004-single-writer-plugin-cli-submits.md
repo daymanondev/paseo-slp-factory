@@ -24,6 +24,14 @@
   `spawn_dispatched`/`spawn_refused`; only on ok does the driver create the
   agent over the daemon's own WebSocket RPC, idempotency-keyed by task id.
   The one-writer law is unchanged — the driver never writes the ledger.)*
+  *(Amended 2026-10-10, v0.0.8 ticket 04: the Meter rides the same law — the
+  driver captures the daemon's usage snapshot (`lastUsage`, live-only truth
+  the daemon persists nowhere) at each task's terminal moment, one re-fetch
+  against the usage-merge race, and submits one `meter` request through the
+  spool; the plugin validates (shape, task known) and appends one
+  task-scoped `meter_written` line per task per driver run. A refused meter
+  errors back with no ledger line. Still unchanged: the driver never writes
+  the ledger.)*
 - **The Agent gets the Claim as a CLI on its `PATH`**, put there by the plugin's
   `agent.session_open` before-hook — not as an MCP tool. It accepts only `--task` and
   `--sha`. *(Amended 2026-10-07, ticket 06: the original wording said `agent.create`;

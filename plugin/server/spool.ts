@@ -22,6 +22,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { FactoryError } from "./core/errors.ts";
+import { usageIsValid } from "./core/ledger.ts";
 import type { Factory } from "./core/factory.ts";
 import type { Verdict } from "./core/events.ts";
 
@@ -88,6 +89,32 @@ export interface RetroRequest {
 }
 
 /**
+ * The driver's meter request (v0.0.8, ticket 03 item 1 — ADR 0004's third
+ * amendment): the usage snapshot the driver captured off its terminal
+ * `fetch_agent` poll, submitted for the plugin to validate and ledger as
+ * one `meter_written` line. The driver never writes the ledger; a refused
+ * meter (unknown task, malformed shape) errors back with no line — nothing
+ * changed, nothing recorded. `usage` rides the daemon's camelCase verbatim,
+ * each field present only when the lane provided it.
+ */
+export interface MeterRequest {
+  id: string;
+  kind: "meter";
+  task: string;
+  /** The `provider[/model]` string the driver's invocation ran under, verbatim. */
+  provider: string;
+  /** The daemon's usage snapshot: the four metered fields, each optional. */
+  usage: {
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    outputTokens?: number;
+    totalCostUsd?: number;
+  };
+  /** The metered agent's id, when the driver knows it. */
+  agent?: string;
+}
+
+/**
  * A synthetic permit ask (v0.0.4) — the bypass battery's vehicle into the real
  * choke: the same policy, the same ledger lines, answered in the reply instead
  * of `respondToPermission()` because no daemon ask exists to answer. The task
@@ -104,7 +131,7 @@ export interface AskRequest {
   name?: string;
 }
 
-export type SpoolRequest = ContractRequest | ClaimRequest | AcceptRequest | AskRequest | SpawnRequest | RetroRequest;
+export type SpoolRequest = ContractRequest | ClaimRequest | AcceptRequest | AskRequest | SpawnRequest | MeterRequest | RetroRequest;
 
 /** Handles a synthetic ask — `createChoke(...).spoolAskHandler` is the implementation. */
 export type AskHandler = (request: AskRequest) => SpoolReply;
@@ -186,6 +213,22 @@ export function parseSpoolRequest(body: unknown): SpoolRequest | undefined {
     const keys = Object.keys(req).filter((key) => key !== "id" && key !== "kind");
     if (keys.length > 0) return undefined;
     return { id: req.id, kind: "retro" };
+  }
+  if (req.kind === "meter") {
+    if (typeof req.task !== "string" || typeof req.provider !== "string" || req.provider.trim() === "") return undefined;
+    if (req.agent !== undefined && typeof req.agent !== "string") return undefined;
+    // Usage keeps the daemon's camelCase verbatim, but only the four metered
+    // fields may ride — the spool never guesses what a lane meant.
+    if (!usageIsValid(req.usage)) return undefined;
+    const usage = { ...(req.usage as Record<string, number>) } as MeterRequest["usage"];
+    return {
+      id: req.id,
+      kind: "meter",
+      task: req.task,
+      provider: req.provider,
+      usage,
+      ...(req.agent === undefined ? {} : { agent: req.agent }),
+    };
   }
   if (req.kind === "ask") {
     if (typeof req.task !== "string" || typeof req.command !== "string" || req.command.trim() === "") return undefined;
@@ -277,6 +320,21 @@ export async function handleSpoolRequest(
         ok: true,
         summary: `spawn dispatched for ${request.task} under ${request.provider} (n=${request.arity})`,
       };
+    }
+    if (request.kind === "meter") {
+      // The driver's post-verdict capture (v0.0.8): one line, validated and
+      // appended. The reply's summary carries the dollars the lane reported
+      // (or their named absence) — the driver's log line is where the run's
+      // cost first becomes visible to the operator.
+      const event = factory.meter({
+        task: request.task,
+        provider: request.provider,
+        usage: request.usage,
+        ...(request.agent === undefined ? {} : { agent: request.agent }),
+      });
+      const dollars = event.usage.totalCostUsd;
+      const cost = dollars === undefined ? "no dollars reported (recorded as absent)" : `$${dollars.toFixed(2)}`;
+      return { id: request.id, ok: true, summary: `meter for ${request.task} under ${request.provider}: ${cost}` };
     }
     if (request.kind === "retro") {
       // The Owner's on-demand pass (v0.0.7): the plugin runs it whole. A

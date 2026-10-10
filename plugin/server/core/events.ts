@@ -27,6 +27,13 @@
  * task, no attempt, like every Retro line — one per on-demand Retro pass,
  * written only when the pass produced its proposals file (file first, then
  * the line; a refused Retro writes no line at all).
+ * `meter_written` is v0.0.8 (ticket 03): the Meter's one line per task per
+ * driver run — task-scoped like the spawn lines, because usage spans the
+ * whole run. The dollars it carries are live-only truth: the daemon keeps
+ * usage in memory per agent and persists it nowhere, so the driver must
+ * capture `lastUsage` at the task's terminal moment and submit it through
+ * the spool (ADR 0004's third amendment) before the agent dies or the
+ * daemon restarts — after that, the fact is gone for good.
  */
 
 export type Verdict = "red" | "green";
@@ -35,8 +42,9 @@ export type Verdict = "red" | "green";
  * The whole event vocabulary — single source for types and validation. The
  * first eight are the attempt-scoped loop in ledger order; the choke
  * vocabulary (v0.0.4) and the spawn vocabulary (v0.0.5) follow, appended
- * after their host loops; `retro_written` (v0.0.7) closes as the one
- * factory-level event.
+ * after their host loops; the driver's meter line (v0.0.8) rides beside the
+ * spawn events; `retro_written` (v0.0.7) closes as the one factory-level
+ * event.
  */
 export const EVENT_NAMES = [
   "contract_set",
@@ -52,6 +60,7 @@ export const EVENT_NAMES = [
   "git_blocked",
   "spawn_dispatched",
   "spawn_refused",
+  "meter_written",
   "retro_written",
 ] as const;
 
@@ -162,13 +171,14 @@ export interface FreshEyesWritten {
 
 /**
  * The watch line (v0.0.6, ticket 03; questions shrunk to four in v0.0.7
- * ticket 04 rider #1): one record-only pass that asked the Watch questions
- * of one Attempt — red and green both. `answers` maps
- * every question name to its yes-probability, or null when the response did
- * not answer it (a partially-answered response is `outcome: "failed"` with
- * `error` naming the missing — never a silent gap). Priors are NOT here: the
- * API has no prior field, and joining the §6 priors is the operator's act at
- * close-out. On `failed`, `error` carries the reason — deaths are visible.
+ * ticket 04 rider #1, back to five in v0.0.8 ticket 03 rider #1): one
+ * record-only pass that asked the Watch questions of one Attempt — red and
+ * green both. `answers` maps every question name to its yes-probability, or
+ * null when the response did not answer it (a partially-answered response is
+ * `outcome: "failed"` with `error` naming the missing — never a silent gap).
+ * Priors are NOT here: the API has no prior field, and joining the §6 priors
+ * is the operator's act at close-out. On `failed`, `error` carries the
+ * reason — deaths are visible.
  */
 export interface WatchWritten {
   seq: number;
@@ -183,7 +193,7 @@ export interface WatchWritten {
    */
   model: string;
   outcome: "written" | "failed";
-  /** Present whenever a response arrived: 8 names → noul double, or null. */
+  /** Present whenever a response arrived: every question name → noul double, or null. */
   answers?: Record<string, number | null>;
   /** Present whenever a response arrived: cost is the response's own, or the ÷MTok fallback. */
   usage?: { input_tokens: number; cost: number };
@@ -302,6 +312,41 @@ export interface SpawnRefused {
 }
 
 /**
+ * The Meter's one line (v0.0.8, ticket 03) — the post-verdict capture of
+ * what one task's run cost its lane. The driver reads the daemon's
+ * `lastUsage` off its terminal poll and submits it through the spool; the
+ * plugin validates and appends (ADR 0004's one-writer law, third
+ * amendment). One line per task per driver run — a re-run task lands a
+ * second line, and the Cost read takes the latest. A recorder, never a
+ * judge: no budgets, no alerts, verdicts unchanged.
+ */
+export interface MeterWritten {
+  seq: number;
+  ts: Timestamp;
+  event: "meter_written";
+  task: string;
+  /** The `provider[/model]` string the driver ran the task under — recorded verbatim, like `spawn_dispatched`. */
+  provider: string;
+  /**
+   * The daemon's own usage snapshot, verbatim camelCase: each field present
+   * only when the lane provided it. Claude meters tokens plus a cumulative
+   * USD estimate (`totalCostUsd`); copilot counts tokens at most — ACP has
+   * no cost field — and its dollars are a subscription fact, never a
+   * measurement. An empty object is the honest "capture ran, the lane
+   * reported nothing" (the all-null `watch_written.usage` trap this
+   * verbatim rule avoids: absent means absent, nothing poses as zero).
+   */
+  usage: {
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    outputTokens?: number;
+    totalCostUsd?: number;
+  };
+  /** The metered agent's id, when the driver knows it (the report precedent). */
+  agent?: string;
+}
+
+/**
  * The Retro's one line (v0.0.7, ticket 03) — the first factory-level event:
  * no task, no attempt, because the Retro reads the whole ledger, not any
  * task's slice of it. Mirrors `watch_written`'s shape: `model` is the pinned
@@ -343,6 +388,7 @@ export type LedgerEvent =
   | GitBlocked
   | SpawnDispatched
   | SpawnRefused
+  | MeterWritten
   | RetroWritten;
 
 /** What callers hand to Ledger.append — same shape, `seq` and `ts` not yet assigned. */
@@ -360,4 +406,5 @@ export type PendingEvent =
   | Omit<GitBlocked, "seq" | "ts">
   | Omit<SpawnDispatched, "seq" | "ts">
   | Omit<SpawnRefused, "seq" | "ts">
+  | Omit<MeterWritten, "seq" | "ts">
   | Omit<RetroWritten, "seq" | "ts">;
