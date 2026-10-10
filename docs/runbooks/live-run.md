@@ -72,7 +72,10 @@ working agent.
 - The gate runs under the daemon's env, which has no nvm — resolve node
   absolutely when the contract is set (`$(which node)`), or the suite dies at
   exit 127 inside the gate (ticket 09, attempt 1). The same law applies to
-  anything else the gated suite resolves from PATH.
+  anything else the gated suite resolves from PATH. Contract authoring law
+  since v0.0.8 (ratified R6): the gate command pins its executables
+  absolutely, never a bare PATH-resolved invocation — a runner-setup failure
+  must never wear a work-quality verdict.
 - `--scope` (first live use in ticket 06): workspace-relative prefixes the
   diff may touch; anything outside goes red. Keep it tight — it is the
   mechanical refusal lane. Note: the drift guard between `src/` and
@@ -90,6 +93,22 @@ working agent.
   hands it to the agent verbatim. This retires the v0.0.5 TASK.md seed
   workaround — no seeded assignment commit, nothing to drop at landing; write
   the assignment here instead.
+- Contract authoring law (v0.0.8 — the first Ratification: the v0.0.7
+  Retro's batch ratified 2026-10-10, R6 in the gate bullet above and R2–R5
+  here, each clause grown from ledger evidence in
+  `~/.paseo-factory/plugin-state/paseo-factory/retro-2026-10-09.md`): the
+  description and the scope must stay coherent — never require an edit
+  outside `--scope`; widen the scope or forbid the edit (R4 — a description
+  demanding a README line with README.md out of scope manufactures the
+  violation it then punishes). A task whose intended work loosens test
+  assertions or reduces their precision says so in the description (R2 —
+  without that opt-in, an exact-to-loose rewrite reads as suspect weakening
+  to the watch). A task that forbids running tests never asks for "all tests
+  pass" (R3 — prescribe "implementation complete; tests not run locally";
+  the contract must not push the agent into fake-done wording). A bootstrap
+  step that reads environment or service configuration may confirm the step
+  completed, and nothing more — never echo, commit, or summarize secret
+  values (R5).
 - `contract_set` records the base sha; note it in the ticket.
 - The contract must precede `factory run` (step 4) — the driver reads the
   task's workspace and gate from it.
