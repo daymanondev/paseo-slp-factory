@@ -97,7 +97,7 @@ The comparison words for one arm against ground truth: hit (CONCERN citing the p
 _Avoid_: pass/fail (those are Verdict words)
 
 **Watch battery**:
-The instrument that measures the Watch: one planted arm per Watch question (four since the v0.0.7 shrink) plus a clean control, run through the real pipeline on the trial daemon with the Watch on, outcomes asserted with the Battery outcome words against pre-registered ground truth (a flag means yes-probability ≥ 0.5 naming the planted evidence). The runner never judges and never accepts; comparison against ground truth is the operator's act at close-out. Added in v0.0.6.
+The instrument that measures the Watch: one planted arm per Watch question (five again since the v0.0.8 re-arm) plus a clean control, run through the real pipeline on the trial daemon with the Watch on, outcomes asserted with the Battery outcome words against pre-registered ground truth (a flag means yes-probability ≥ 0.5 naming the planted evidence). The runner never judges and never accepts; comparison against ground truth is the operator's act at close-out. Added in v0.0.6.
 _Avoid_: eval suite, calibration set (that is the later tooling)
 
 ### Permissions
